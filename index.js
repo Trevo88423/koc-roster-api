@@ -8,6 +8,10 @@ const app = express();
 const allowedOrigins = [
   "https://www.kingsofchaos.com",
   "https://kingsofchaos.com"
+   "https://www.kingsofchaos.com",
+  "https://kingsofchaos.com",
+  "http://www.kingsofchaos.com", // if on http
+  "http://kingsofchaos.com"
 ];
 
 app.use(cors({
