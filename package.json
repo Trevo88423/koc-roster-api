@@ -1,0 +1,15 @@
+{
+  "name": "koc-roster-api",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Minimal API to share KoC roster data (free test version)",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node index.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2"
+  }
+}
