@@ -1,14 +1,20 @@
-// Known-good Express API with permissive CORS for Railway
-import express from "express";
 import cors from "cors";
 
-const app = express();
+const allowedOrigins = new Set([
+  "https://www.kingsofchaos.com",
+  "https://kingsofchaos.com"
+]);
 
-// Permissive CORS for testing; lock down later
-app.use(cors({ origin: true }));
-app.options("*", cors({ origin: true }));
+app.use(cors({
+  origin(origin, cb) {
+    if (!origin || allowedOrigins.has(origin)) return cb(null, true);
+    cb(new Error("CORS not allowed"));
+  },
+  methods: ["GET", "POST", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"]
+}));
 
-app.use(express.json({ limit: "5mb" }));
+app.options("*", cors());
 
 // Health
 app.get("/", (_req, res) => {
