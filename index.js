@@ -4,6 +4,45 @@ import cors from "cors";
 
 const app = express();
 
+/**
+ * CORS — super permissive for testing.
+ * (We can lock this down later.)
+ */
+app.use(cors({ origin: true }));              // reflect request Origin
+app.options("*", cors({ origin: true }));     // handle preflight for all routes
+
+app.use(express.json({ limit: "5mb" }));
+
+// sanity check route
+app.get("/", (_req, res) => {
+  res.json({ ok: true, service: "koc-roster-api" });
+});
+
+// ------- your routes -------
+let sharedRoster = {};
+let lastUpdated = Date.now();
+
+app.post("/upload", (req, res) => {
+  const { data } = req.body || {};
+  if (!data || typeof data !== "object") {
+    return res.status(400).json({ error: "No data" });
+  }
+  let added = 0, updated = 0;
+  for (const [id, record] of Object.entries(data)) {
+    if (!sharedRoster[id]) { sharedRoster[id] = record; added++; }
+    else { sharedRoster[id] = { ...sharedRoster[id], ...record }; updated++; }
+  }
+  lastUpdated = Date.now();
+  res.json({ message: "Roster updated", added, updated, total: Object.keys(sharedRoster).length });
+});
+
+app.get("/download", (_req, res) => {
+  res.json({ data: sharedRoster, lastUpdated });
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`API running on port ${PORT}`));
+
 // Adjust the allowed origin if KoC uses a different domain variant
 const allowedOrigins = [
   const allowedOrigins = [
