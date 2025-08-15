@@ -6,13 +6,13 @@ const app = express();
 
 // Adjust the allowed origin if KoC uses a different domain variant
 const allowedOrigins = [
-  "https://www.kingsofchaos.com",
-  "https://kingsofchaos.com"
-   "https://www.kingsofchaos.com",
-  "https://kingsofchaos.com",
-  "http://www.kingsofchaos.com", // if on http
-  "http://kingsofchaos.com"
+  const allowedOrigins = [
+  'https://www.kingsofchaos.com',
+  'https://kingsofchaos.com'
+  // add http:// variants only if you actually use http
 ];
+
+
 
 app.use(cors({
   origin: function(origin, callback) {
