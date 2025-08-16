@@ -1,25 +1,43 @@
 import express from "express";
 import cors from "cors";
 
-const app = express(); // <<< must be before any app.use calls
+const app = express(); // <-- must come before any app.use
 
-// Allow all origins for now (can lock down later)
-app.use(cors({ origin: true }));
-app.options("*", cors({ origin: true }));
+// --- Locked CORS: KoC only (plus localhost for testing) ---
+const allowedOrigins = new Set([
+  "https://www.kingsofchaos.com",
+  "https://kingsofchaos.com",
+  "http://localhost:3000",
+  "http://127.0.0.1:3000"
+]);
 
-// Parse JSON bodies
+const corsConfig = {
+  origin(origin, cb) {
+    if (!origin || allowedOrigins.has(origin)) return cb(null, true);
+    cb(new Error("CORS not allowed for origin: " + origin));
+  },
+  methods: ["GET", "POST", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  credentials: false,
+  maxAge: 86400
+};
+
+app.use(cors(corsConfig));
+app.options("*", cors(corsConfig)); // preflight
+
+// --- Body parsing ---
 app.use(express.json({ limit: "5mb" }));
 
-// In-memory data store
-let sharedRoster = {};
-let lastUpdated = Date.now();
-
-// Health check
+// --- Health ---
 app.get("/", (_req, res) => {
   res.json({ ok: true, service: "koc-roster-api", env: process.env.NODE_ENV || "dev" });
 });
 
-// Upload data
+// --- In-memory store (resets on redeploy) ---
+let sharedRoster = {};
+let lastUpdated = Date.now();
+
+// --- Routes ---
 app.post("/upload", (req, res) => {
   const { data } = req.body || {};
   if (!data || typeof data !== "object") {
@@ -27,24 +45,20 @@ app.post("/upload", (req, res) => {
   }
   let added = 0, updated = 0;
   for (const [id, record] of Object.entries(data)) {
-    if (!sharedRoster[id]) {
-      sharedRoster[id] = record;
-      added++;
-    } else {
-      sharedRoster[id] = { ...sharedRoster[id], ...record };
-      updated++;
-    }
+    if (!sharedRoster[id]) { sharedRoster[id] = record; added++; }
+    else { sharedRoster[id] = { ...sharedRoster[id], ...record }; updated++; }
   }
   lastUpdated = Date.now();
   res.json({ message: "Roster updated", added, updated, total: Object.keys(sharedRoster).length });
 });
 
-// Download data
 app.get("/download", (_req, res) => {
   res.json({ data: sharedRoster, lastUpdated });
 });
 
+// --- Start ---
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`API running on port ${PORT}`);
+  console.log("API running on port", PORT);
 });
+
