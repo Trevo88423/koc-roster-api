@@ -25,6 +25,16 @@ const corsConfig = {
 app.use(cors(corsConfig));
 app.options("*", cors(corsConfig)); // preflight
 
+// --- Bearer token auth (optional: enabled when API_TOKEN is set) ---
+const TOKEN = process.env.API_TOKEN || "";
+app.use((req, res, next) => {
+  if (!TOKEN) return next(); // no auth when no token configured
+  const auth = req.get("Authorization") || "";
+  if (auth === `Bearer ${TOKEN}`) return next();
+  res.status(401).json({ error: "Unauthorized" });
+});
+
+
 // --- Body parsing ---
 app.use(express.json({ limit: "5mb" }));
 
