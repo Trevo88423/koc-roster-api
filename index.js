@@ -1,7 +1,10 @@
 import express from "express";
 import cors from "cors";
 
-const app = express(); // <-- must come before any app.use
+const app = express();
+
+// --- Serve static files PUBLICLY (no CORS/auth) ---
+app.use(express.static("public"));
 
 // --- Locked CORS: KoC only (plus localhost for testing) ---
 const allowedOrigins = new Set([
@@ -33,7 +36,6 @@ app.use((req, res, next) => {
   if (auth === `Bearer ${TOKEN}`) return next();
   res.status(401).json({ error: "Unauthorized" });
 });
-
 
 // --- Body parsing ---
 app.use(express.json({ limit: "5mb" }));
@@ -71,4 +73,3 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log("API running on port", PORT);
 });
-
