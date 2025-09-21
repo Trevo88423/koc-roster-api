@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         KoC Data Centre Development script
+// @name         KoC Data Centre
 // @namespace    trevo88423
-// @version      1.5.0
+// @version      1.5.1
 // @description  Unified script: Tracks TIV + recon stats (Battlefield, Attack, Armory, Recon). Provides roster dashboards with multi-tab views: Roster, Top TIV, All Stats. Adds XP → Attacks Turn Trading Calculator (Sidebar, Popup, Attack Log, Recon).
 // @author       Trevor & ChatGPT
 // @match        https://www.kingsofchaos.com/*
