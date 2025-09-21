@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         KoC Data Centre
+// @name         KoC Data Centre Development script
 // @namespace    trevo88423
 // @version      1.5.0
 // @description  Unified script: Tracks TIV + recon stats (Battlefield, Attack, Armory, Recon). Provides roster dashboards with multi-tab views: Roster, Top TIV, All Stats. Adds XP → Attacks Turn Trading Calculator (Sidebar, Popup, Attack Log, Recon).
@@ -45,6 +45,18 @@
     map[id] = { ...prev, ...patch, lastSeen: new Date().toISOString() };
     saveNameMap(map);
   }
+    // =========================
+// === Alliance Restriction
+// =========================
+const myId = localStorage.getItem("KoC_MyId");
+const nameMap = JSON.parse(localStorage.getItem("KoC_NameMap") || "{}");
+const me = nameMap[myId];
+
+if (me && me.alliance !== "Sweet Revenge") {
+  alert("❌ This script is restricted to the Sweet Revenge alliance.");
+  throw new Error("Unauthorized alliance"); // stop script
+}
+
 // ==============================
 // === XP → Attacks Calculator ===
 // ==============================
@@ -993,95 +1005,148 @@ function renderTable(containerId, columns, rows, defaultSortKey = null, defaultS
     ], prepareTopTivRows(20), "tiv", true);
   }
 
-  function renderAllStats(limit = 10) {
-    const container = document.getElementById("viewAllStats");
-    if (!container) return;
+function renderAllStats(limit = 10) {
+  const container = document.getElementById("viewAllStats");
+  if (!container) return;
 
-    const statDefs = [
-      {key:"tiv", label:"TIV"},
-      {key:"strike", label:"Strike"},
-      {key:"defense", label:"Defense"},
-      {key:"spy", label:"Spy"},
-      {key:"sentry", label:"Sentry"},
-      {key:"poison", label:"Poison"},
-      {key:"antidote", label:"Antidote"},
-      {key:"theft", label:"Theft"},
-      {key:"vigilance", label:"Vigilance"}
-    ];
+  // === Stat definitions (Rank included) ===
+  const statDefs = [
+    {key:"tiv", label:"TIV"},
+    {key:"strike", label:"Strike"},
+    {key:"defense", label:"Defense"},
+    {key:"spy", label:"Spy"},
+    {key:"sentry", label:"Sentry"},
+    {key:"poison", label:"Poison"},
+    {key:"antidote", label:"Antidote"},
+    {key:"theft", label:"Theft"},
+    {key:"vigilance", label:"Vigilance"},
+    {key:"rank", label:"Rank"}   // 👈 new
+  ];
 
-    // Dropdown for global limit
-    container.innerHTML = `
-      <div style="margin-bottom:12px;">
-        Show:
-        <select id="allStatsLimit">
-          <option value="10" ${limit==10?"selected":""}>Top 10</option>
-          <option value="20" ${limit==20?"selected":""}>Top 20</option>
-          <option value="50" ${limit==50?"selected":""}>Top 50</option>
-          <option value="0" ${limit==0?"selected":""}>All</option>
-        </select>
-      </div>
-      <div id="allStatsTables"></div>
+  // === Remember previous selection (if exists) ===
+  const prevAlliance = document.getElementById("allStatsAlliance")?.value || "";
+  const prevLimit = document.getElementById("allStatsLimit")?.value || limit;
+
+  // === Build unique alliance list ===
+  const alliances = [...new Set(Object.values(nameMap)
+    .map(info => info.alliance)
+    .filter(a => a && a.trim() !== ""))]
+    .sort();
+
+  // === Rebuild container HTML ===
+  container.innerHTML = `
+    <div style="margin-bottom:12px;">
+      Show:
+      <select id="allStatsLimit">
+        <option value="10">Top 10</option>
+        <option value="20">Top 20</option>
+        <option value="50">Top 50</option>
+        <option value="0">All</option>
+      </select>
+      &nbsp;&nbsp;Alliance:
+      <select id="allStatsAlliance">
+        <option value="">All</option>
+        ${alliances.map(a => `<option value="${a}">${a}</option>`).join("")}
+      </select>
+    </div>
+    <div id="allStatsTables"></div>
+  `;
+
+  // === Restore dropdown selections ===
+  document.getElementById("allStatsLimit").value = prevLimit;
+  document.getElementById("allStatsAlliance").value = prevAlliance;
+
+  const allianceFilter = document.getElementById("allStatsAlliance")?.value || "";
+  const tablesDiv = document.getElementById("allStatsTables");
+
+  // === Loop through statDefs and build tables ===
+  statDefs.forEach(stat => {
+    let rows = Object.entries(nameMap)
+      .filter(([id, info]) => (stat.key==="tiv" || stat.key==="rank") || !!info.strikeAction)
+      .map(([id, info]) => {
+        const tivRec = lastTiv[id];
+        const tivNum = (typeof info.tiv === "number" ? info.tiv : (tivRec?.tiv || 0));
+
+        let value;
+        if (stat.key === "tiv") {
+          value = tivNum;
+        } else if (stat.key === "defense") {
+          value = info.defensiveAction || 0;
+        } else if (stat.key === "rank") {
+          value = parseInt(info.rank?.replace(/[^\d]/g,"") || "0",10);
+        } else {
+          value = info[`${stat.key}Action`] || info[`${stat.key}Rating`] || info[stat.key] || 0;
+        }
+
+        return {
+          id,
+          name: info.name || "Unknown",
+          link: `<a href="https://www.kingsofchaos.com/attack.php?id=${id}" target="_blank">${info.name || "Unknown"}</a>`,
+          value,
+          alliance: info.alliance || "",
+          lastRecon: (stat.key==="tiv" || stat.key==="rank"
+                        ? (info.lastSeen || tivRec?.time)
+                        : getLatestReconTime(info))
+        };
+      });
+
+    // === Apply alliance filter ===
+    if (allianceFilter) {
+      rows = rows.filter(r => r.alliance === allianceFilter);
+    }
+
+    // === Sort by stat ===
+    if (stat.key === "rank") {
+      rows.sort((a,b) => toNum(a.value) - toNum(b.value)); // lower rank = better
+    } else {
+      rows.sort((a,b) => toNum(b.value) - toNum(a.value)); // higher = better
+    }
+
+    const nLimit = parseInt(prevLimit, 10) || limit;
+    if (nLimit > 0) rows = rows.slice(0, nLimit);
+
+    const topName = rows.length ? rows[0].name : "—";
+
+    const html = `
+      <h3 style="margin:15px 0 5px;">
+        Top ${nLimit>0?nLimit:"All"} ${stat.label} — 🥇 #1: ${topName}
+      </h3>
+      <table border="1" cellpadding="6" cellspacing="0"
+             style="border-collapse:collapse;width:100%;background:#222;margin-bottom:20px;">
+        <thead style="background:#333;color:gold;">
+          <tr>
+            <th>Rank</th>
+            <th>Name</th>
+            <th>Alliance</th>
+            <th>${stat.label}</th>
+            <th>Last Recon</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map((r,i) => `
+            <tr style="${i===0 ? 'background:#444;color:gold;font-weight:bold;' : ''}">
+              <td>#${i+1}</td>
+              <td>${r.link}</td>
+              <td>${r.alliance || "—"}</td>
+              <td>${r.value.toLocaleString ? r.value.toLocaleString() : r.value}</td>
+              <td>${r.lastRecon ? timeAgo(r.lastRecon) : "—"}</td>
+            </tr>
+          `).join("") || `<tr><td colspan="5">No data yet.</td></tr>`}
+        </tbody>
+      </table>
     `;
+    tablesDiv.innerHTML += html;
+  });
 
-    const tablesDiv = document.getElementById("allStatsTables");
+  // === Re-bind dropdowns ===
+  document.getElementById("allStatsLimit").addEventListener("change", e => {
+    renderAllStats(parseInt(e.target.value, 10));
+  });
+  document.getElementById("allStatsAlliance").addEventListener("change", () => {
+    renderAllStats(limit);
+  });
+}
 
-    statDefs.forEach(stat => {
-      let rows = Object.entries(nameMap)
-        .filter(([id, info]) => (stat.key==="tiv") || !!info.strikeAction)
-        .map(([id, info]) => {
-          const tivRec = lastTiv[id];
-          const tivNum = (typeof info.tiv === "number" ? info.tiv : (tivRec?.tiv || 0));
-          let value;
-
-          if (stat.key === "tiv") {
-            value = tivNum;
-          } else if (stat.key === "defense") {
-            value = info.defensiveAction || 0;
-          } else {
-            value = info[`${stat.key}Action`] || info[`${stat.key}Rating`] || info[stat.key] || 0;
-          }
-
-          return {
-            name: info.name || "Unknown",
-            link: `<a href="https://www.kingsofchaos.com/attack.php?id=${id}" target="_blank">${info.name || "Unknown"}</a>`,
-            value,
-            lastRecon: (stat.key==="tiv"
-                          ? (info.lastSeen || tivRec?.time)
-                          : getLatestReconTime(info))
-          };
-        });
-
-      rows.sort((a,b) => toNum(b.value) - toNum(a.value));
-      if (limit > 0) rows = rows.slice(0, limit);
-
-      const topName = rows.length ? rows[0].name : "—";
-
-      const html = `
-        <h3 style="margin:15px 0 5px;">Top ${limit>0?limit:"All"} ${stat.label} — 🥇 #1: ${topName}</h3>
-        <table border="1" cellpadding="6" cellspacing="0"
-               style="border-collapse:collapse;width:100%;background:#222;margin-bottom:20px;">
-          <thead style="background:#333;color:gold;">
-            <tr><th>Rank</th><th>Name</th><th>${stat.label}</th><th>Last Recon</th></tr>
-          </thead>
-          <tbody>
-            ${rows.map((r,i) => `
-              <tr style="${i===0 ? 'background:#444;color:gold;font-weight:bold;' : ''}">
-                <td>#${i+1}</td>
-                <td>${r.link}</td>
-                <td>${r.value.toLocaleString ? r.value.toLocaleString() : r.value}</td>
-                <td>${r.lastRecon ? timeAgo(r.lastRecon) : "—"}</td>
-              </tr>
-            `).join("") || `<tr><td colspan="4">No data yet.</td></tr>`}
-          </tbody>
-        </table>
-      `;
-      tablesDiv.innerHTML += html;
-    });
-
-    document.getElementById("allStatsLimit").addEventListener("change", e => {
-      renderAllStats(parseInt(e.target.value, 10));
-    });
-  }
 
   // Initial render = Roster tab
   renderRoster();
@@ -1105,47 +1170,51 @@ function renderTable(containerId, columns, rows, defaultSortKey = null, defaultS
 
 
   // =========================
-  // === Button Injection ===
-  // =========================
-  function addButtons() {
-    const infoRow = document.querySelector("a[href='info.php']")?.closest("tr");
-    if (!infoRow) {
-      setTimeout(addButtons, 500);
-      return;
-    }
+// === Button Injection ===
+// =========================
+function addButtons() {
+  // Only inject if logged in (logout link present)
+  if (!document.querySelector("a[href='logout.php']")) return;
 
-    infoRow.innerHTML = `
-      <td align="center">
-        <a href="info.php" class="koc-button">
-          <img alt="KoC Info" src="/images/bon/KOC_Info_2024.png" width="250">
-        </a>
-      </td>
-      <td align="center">
-        <a id="koc-data-centre-btn" href="datacentre" class="koc-button">
-          <img alt="Data Centre" src="https://raw.githubusercontent.com/Trevo88423/koc-roster-api/main/public/KoC_DataCentre.png" width="250">
-        </a>
-      </td>
-    `;
+  const infoRow = document.querySelector("a[href='info.php']")?.closest("tr");
+  if (!infoRow) {
+    setTimeout(addButtons, 500);
+    return;
   }
 
-  // Command Center (base.php) → add buttons + sidebar calc
-if (location.pathname.includes("base.php")) {
+  infoRow.innerHTML = `
+    <td align="center">
+      <a href="info.php" class="koc-button">
+        <img alt="KoC Info" src="/images/bon/KOC_Info_2024.png" width="250">
+      </a>
+    </td>
+    <td align="center">
+      <a id="koc-data-centre-btn" href="datacentre" class="koc-button">
+        <img alt="Data Centre" src="https://raw.githubusercontent.com/Trevo88423/koc-roster-api/main/public/KoC_DataCentre.png" width="250">
+      </a>
+    </td>
+  `;
+}
+
+// Command Center (base.php) → add buttons + sidebar calc
+if (location.pathname.includes("base.php") && document.querySelector("a[href='logout.php']")) {
   addButtons();
   initSidebarCalculator();
 }
 
-// Any page with sidebar (menu_cell) → show sidebar calc
-if (document.querySelector("td.menu_cell")) {
+// Any page with sidebar (menu_cell) → show sidebar calc (only if logged in)
+if (document.querySelector("td.menu_cell") && document.querySelector("a[href='logout.php']")) {
   initSidebarCalculator();
-}
-// Attach popup hook anywhere sidebar exists
-if (document.querySelector("td.menu_cell")) {
   hookSidebarPopup();
 }
-if (location.pathname.includes("attacklog.php")) {
+
+// Attack log → enhance (only if logged in)
+if (location.pathname.includes("attacklog.php") && document.querySelector("a[href='logout.php']")) {
   enhanceAttackLog();
 }
-if (location.pathname.includes("inteldetail.php")) {
+
+// Recon detail → add max attacks (only if logged in)
+if (location.pathname.includes("inteldetail.php") && document.querySelector("a[href='logout.php']")) {
   addMaxAttacksRecon();
 }
 
