@@ -48,7 +48,7 @@ const pool = new Pool({
     : false
 });
 
-// --- Health ---
+// --- Health check ---
 app.get("/", (_req, res) => {
   res.json({ ok: true, service: "koc-roster-api", env: process.env.NODE_ENV || "dev" });
 });
@@ -86,6 +86,7 @@ app.get("/initdb", async (_req, res) => {
 });
 
 // --- Player routes ---
+// Upsert player
 app.post("/players", async (req, res) => {
   const { id, ...fields } = req.body || {};
   if (!id) return res.status(400).json({ error: "Missing player id" });
@@ -105,6 +106,7 @@ app.post("/players", async (req, res) => {
   }
 });
 
+// Get all players
 app.get("/players", async (_req, res) => {
   try {
     const result = await pool.query("SELECT * FROM players ORDER BY updated_at DESC");
@@ -115,6 +117,7 @@ app.get("/players", async (_req, res) => {
   }
 });
 
+// Get single player
 app.get("/players/:id", async (req, res) => {
   try {
     const result = await pool.query("SELECT * FROM players WHERE id=$1", [req.params.id]);
@@ -127,6 +130,35 @@ app.get("/players/:id", async (req, res) => {
 });
 
 // --- TIV routes ---
+// Add TIV log
 app.post("/tiv", async (req, res) => {
   const { playerId, tiv } = req.body || {};
-  if (!playerId || !tiv) return res.status(400)
+  if (!playerId || !tiv) return res.status(400).json({ error: "Missing fields" });
+  try {
+    await pool.query("INSERT INTO tiv_logs (player_id, tiv) VALUES ($1,$2)", [playerId, tiv]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "DB error" });
+  }
+});
+
+// Get TIV history for player
+app.get("/tiv/:id", async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT tiv, time FROM tiv_logs WHERE player_id=$1 ORDER BY time DESC",
+      [req.params.id]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "DB error" });
+  }
+});
+
+// --- Start server ---
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log("API running on port", PORT);
+});
