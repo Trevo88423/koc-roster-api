@@ -53,38 +53,6 @@ app.get("/", (_req, res) => {
   res.json({ ok: true, service: "koc-roster-api", env: process.env.NODE_ENV || "dev" });
 });
 
-// --- Temporary route to initialize DB ---
-app.get("/initdb", async (_req, res) => {
-  try {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS players (
-        id TEXT PRIMARY KEY,
-        name TEXT,
-        alliance TEXT,
-        race TEXT,
-        army TEXT,
-        rank TEXT,
-        tiv BIGINT,
-        updated_at TIMESTAMP DEFAULT NOW()
-      );
-    `);
-
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS tiv_logs (
-        id SERIAL PRIMARY KEY,
-        player_id TEXT REFERENCES players(id),
-        tiv BIGINT,
-        time TIMESTAMP DEFAULT NOW()
-      );
-    `);
-
-    res.json({ ok: true, message: "Tables created/verified" });
-  } catch (err) {
-    console.error("DB init failed", err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
 // --- Player routes ---
 // Upsert player
 app.post("/players", async (req, res) => {
