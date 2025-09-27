@@ -124,6 +124,47 @@ app.get("/tiv/:id", async (req, res) => {
     res.status(500).json({ error: "DB error" });
   }
 });
+// --- Plain Roster Page ---
+app.get("/roster", async (req, res) => {
+  try {
+    const result = await pool.query("SELECT * FROM players ORDER BY updated_at DESC");
+
+    const rows = result.rows.map(p => `
+      <tr>
+        ${Object.values(p).map(val => `<td>${val ?? ""}</td>`).join("")}
+      </tr>
+    `).join("");
+
+    const headers = Object.keys(result.rows[0] || {}).map(h => `<th>${h}</th>`).join("");
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>KoC Roster</title>
+        <style>
+          body { font-family: Arial, sans-serif; background:#111; color:#eee; }
+          table { border-collapse: collapse; width: 100%; }
+          th, td { border: 1px solid #444; padding: 6px; text-align: left; }
+          th { background: #222; }
+          tr:nth-child(even) { background: #181818; }
+        </style>
+      </head>
+      <body>
+        <h1>KoC Roster (Raw)</h1>
+        <table>
+          <tr>${headers}</tr>
+          ${rows}
+        </table>
+      </body>
+      </html>
+    `;
+    res.send(html);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Error loading roster");
+  }
+});
 
 // --- Start server ---
 const PORT = process.env.PORT || 3000;
