@@ -40,10 +40,12 @@ app.use((req, res, next) => {
 // --- Body parsing ---
 app.use(express.json({ limit: "5mb" }));
 
-// --- Database connection (Railway provides DATABASE_URL env) ---
+// --- Database connection ---
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : false
+  ssl: process.env.NODE_ENV === "production"
+    ? { rejectUnauthorized: false }
+    : false
 });
 
 // --- Health ---
@@ -84,7 +86,6 @@ app.get("/initdb", async (_req, res) => {
 });
 
 // --- Player routes ---
-// Upsert player
 app.post("/players", async (req, res) => {
   const { id, ...fields } = req.body || {};
   if (!id) return res.status(400).json({ error: "Missing player id" });
@@ -104,7 +105,6 @@ app.post("/players", async (req, res) => {
   }
 });
 
-// Get all players
 app.get("/players", async (_req, res) => {
   try {
     const result = await pool.query("SELECT * FROM players ORDER BY updated_at DESC");
@@ -115,7 +115,6 @@ app.get("/players", async (_req, res) => {
   }
 });
 
-// Get single player
 app.get("/players/:id", async (req, res) => {
   try {
     const result = await pool.query("SELECT * FROM players WHERE id=$1", [req.params.id]);
@@ -128,35 +127,6 @@ app.get("/players/:id", async (req, res) => {
 });
 
 // --- TIV routes ---
-// Add TIV log
 app.post("/tiv", async (req, res) => {
   const { playerId, tiv } = req.body || {};
-  if (!playerId || !tiv) return res.status(400).json({ error: "Missing fields" });
-  try {
-    await pool.query("INSERT INTO tiv_logs (player_id, tiv) VALUES ($1,$2)", [playerId, tiv]);
-    res.json({ ok: true });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "DB error" });
-  }
-});
-
-// Get TIV history for player
-app.get("/tiv/:id", async (req, res) => {
-  try {
-    const result = await pool.query(
-      "SELECT tiv, time FROM tiv_logs WHERE player_id=$1 ORDER BY time DESC",
-      [req.params.id]
-    );
-    res.json(result.rows);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "DB error" });
-  }
-});
-
-// --- Start ---
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log("API running on port", PORT);
-});
+  if (!playerId || !tiv) return res.status(400)
