@@ -59,6 +59,7 @@ app.post("/players", async (req, res) => {
   const { id, ...fields } = req.body || {};
   if (!id) return res.status(400).json({ error: "Missing player id" });
   try {
+    // 1. Update latest snapshot
     await pool.query(
       `INSERT INTO players (id, name, alliance, race, army, rank, tiv, updated_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())
@@ -67,6 +68,13 @@ app.post("/players", async (req, res) => {
       [id, fields.name || null, fields.alliance || null, fields.race || null,
        fields.army || null, fields.rank || null, fields.tiv || null]
     );
+
+    // 2. Save snapshot history
+    await pool.query(
+      "INSERT INTO player_snapshots (player_id, data) VALUES ($1, $2)",
+      [id, fields]
+    );
+
     res.json({ ok: true, id });
   } catch (err) {
     console.error(err);
