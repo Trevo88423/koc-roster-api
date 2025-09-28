@@ -51,6 +51,7 @@ const pool = new Pool({
 // --- Helper: convert snake_case → camelCase ---
 function toCamelCase(obj) {
   if (!obj || typeof obj !== "object") return obj;
+  if (Array.isArray(obj)) return obj; // leave arrays untouched (e.g. weapons)
   const out = {};
   for (const [k, v] of Object.entries(obj)) {
     const camel = k.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
@@ -70,7 +71,7 @@ app.post("/players", async (req, res) => {
   const { id, ...fields } = req.body || {};
   if (!id) return res.status(400).json({ error: "Missing player id" });
   try {
-    // 1. Update latest snapshot
+    // 1. Update latest snapshot in players table
     await pool.query(
       `INSERT INTO players (id, name, alliance, race, army, rank, tiv, updated_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())
@@ -86,15 +87,15 @@ app.post("/players", async (req, res) => {
        fields.army || null, fields.rank || null, fields.tiv || null]
     );
 
-    // 2. Save snapshot history
+    // 2. Save snapshot history (stringify → jsonb)
     await pool.query(
-      "INSERT INTO player_snapshots (player_id, data) VALUES ($1, $2)",
-      [id, fields]
+      "INSERT INTO player_snapshots (player_id, data) VALUES ($1, $2::jsonb)",
+      [id, JSON.stringify(fields)]
     );
 
     res.json({ ok: true, id });
   } catch (err) {
-    console.error(err);
+    console.error("❌ /players insert failed", err);
     res.status(500).json({ error: "DB error" });
   }
 });
@@ -136,7 +137,7 @@ app.get("/players/:id", async (req, res) => {
     if (!result.rows.length) return res.status(404).json({ error: "Not found" });
     res.json(toCamelCase(result.rows[0]));
   } catch (err) {
-    console.error(err);
+    console.error("❌ /players/:id query failed", err);
     res.status(500).json({ error: "DB error" });
   }
 });
@@ -150,10 +151,13 @@ app.get("/snapshots/:id", async (req, res) => {
     );
     res.json({
       playerId: req.params.id,
-      snapshots: result.rows.map(r => ({ ...toCamelCase(r), ...toCamelCase(r.data) }))
+      snapshots: result.rows.map(r => ({
+        ...toCamelCase(r),
+        ...toCamelCase(r.data)
+      }))
     });
   } catch (err) {
-    console.error(err);
+    console.error("❌ /snapshots query failed", err);
     res.status(500).json({ error: "DB error" });
   }
 });
@@ -166,7 +170,7 @@ app.post("/tiv", async (req, res) => {
     await pool.query("INSERT INTO tiv_logs (player_id, tiv) VALUES ($1,$2)", [playerId, tiv]);
     res.json({ ok: true });
   } catch (err) {
-    console.error(err);
+    console.error("❌ /tiv insert failed", err);
     res.status(500).json({ error: "DB error" });
   }
 });
@@ -179,7 +183,7 @@ app.get("/tiv/:id", async (req, res) => {
     );
     res.json(result.rows.map(toCamelCase));
   } catch (err) {
-    console.error(err);
+    console.error("❌ /tiv/:id query failed", err);
     res.status(500).json({ error: "DB error" });
   }
 });
@@ -221,7 +225,7 @@ app.get("/roster", async (req, res) => {
     `;
     res.send(html);
   } catch (err) {
-    console.error(err);
+    console.error("❌ /roster query failed", err);
     res.status(500).send("Error loading roster");
   }
 });
