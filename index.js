@@ -104,6 +104,20 @@ app.get("/players/:id", async (req, res) => {
     res.status(500).json({ error: "DB error" });
   }
 });
+// --- Get all snapshots for a player ---
+app.get("/snapshots/:id", async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await pool.query(
+      "SELECT time, data FROM player_snapshots WHERE player_id = $1 ORDER BY time ASC",
+      [id]
+    );
+    res.json({ player_id: id, snapshots: result.rows });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "DB error" });
+  }
+});
 
 // --- TIV routes ---
 // Add TIV log
