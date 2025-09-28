@@ -61,19 +61,65 @@ app.post("/players", async (req, res) => {
   try {
     // 1. Update latest snapshot
     await pool.query(
-      `INSERT INTO players (id, name, alliance, race, army, rank, tiv, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())
-       ON CONFLICT (id) DO UPDATE
-         SET name     = COALESCE(EXCLUDED.name, players.name),
-             alliance = COALESCE(EXCLUDED.alliance, players.alliance),
-             race     = COALESCE(EXCLUDED.race, players.race),
-             army     = COALESCE(EXCLUDED.army, players.army),
-             rank     = COALESCE(EXCLUDED.rank, players.rank),
-             tiv      = COALESCE(EXCLUDED.tiv, players.tiv),
-             updated_at = NOW()`,
-      [id, fields.name || null, fields.alliance || null, fields.race || null,
-       fields.army || null, fields.rank || null, fields.tiv || null]
-    );
+  `INSERT INTO players (
+     id, name, alliance, race, army, rank, tiv,
+     strike_action, defensive_action, spy_rating, sentry_rating,
+     poison_rating, antidote_rating, theft_rating, vigilance_rating,
+     economy, xp_per_turn, turns_available, treasury, projected_income,
+     updated_at
+   )
+   VALUES (
+     $1,$2,$3,$4,$5,$6,$7,
+     $8,$9,$10,$11,
+     $12,$13,$14,$15,
+     $16,$17,$18,$19,$20,
+     NOW()
+   )
+   ON CONFLICT (id) DO UPDATE SET
+     name              = COALESCE(EXCLUDED.name, players.name),
+     alliance          = COALESCE(EXCLUDED.alliance, players.alliance),
+     race              = COALESCE(EXCLUDED.race, players.race),
+     army              = COALESCE(EXCLUDED.army, players.army),
+     rank              = COALESCE(EXCLUDED.rank, players.rank),
+     tiv               = COALESCE(EXCLUDED.tiv, players.tiv),
+     strike_action     = COALESCE(EXCLUDED.strike_action, players.strike_action),
+     defensive_action  = COALESCE(EXCLUDED.defensive_action, players.defensive_action),
+     spy_rating        = COALESCE(EXCLUDED.spy_rating, players.spy_rating),
+     sentry_rating     = COALESCE(EXCLUDED.sentry_rating, players.sentry_rating),
+     poison_rating     = COALESCE(EXCLUDED.poison_rating, players.poison_rating),
+     antidote_rating   = COALESCE(EXCLUDED.antidote_rating, players.antidote_rating),
+     theft_rating      = COALESCE(EXCLUDED.theft_rating, players.theft_rating),
+     vigilance_rating  = COALESCE(EXCLUDED.vigilance_rating, players.vigilance_rating),
+     economy           = COALESCE(EXCLUDED.economy, players.economy),
+     xp_per_turn       = COALESCE(EXCLUDED.xp_per_turn, players.xp_per_turn),
+     turns_available   = COALESCE(EXCLUDED.turns_available, players.turns_available),
+     treasury          = COALESCE(EXCLUDED.treasury, players.treasury),
+     projected_income  = COALESCE(EXCLUDED.projected_income, players.projected_income),
+     updated_at        = NOW()`,
+  [
+    id,
+    fields.name || null,
+    fields.alliance || null,
+    fields.race || null,
+    fields.army || null,
+    fields.rank || null,
+    fields.tiv || null,
+    fields.strikeAction || null,
+    fields.defensiveAction || null,
+    fields.spyRating || null,
+    fields.sentryRating || null,
+    fields.poisonRating || null,
+    fields.antidoteRating || null,
+    fields.theftRating || null,
+    fields.vigilanceRating || null,
+    fields.economy || null,
+    fields.xpPerTurn || null,
+    fields.turnsAvailable || null,
+    fields.treasury || null,
+    fields.projectedIncome || null
+  ]
+);
+
 
     // 2. Save snapshot history
     await pool.query(
@@ -89,7 +135,7 @@ app.post("/players", async (req, res) => {
 });
 
 // --- Get all players (latest data merged with snapshot) ---
-app.get("/players", async (_req, res) => {
+app.get("/players", async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT p.id, p.name, p.alliance, p.race, p.army, p.rank, p.tiv, p.updated_at,
@@ -105,21 +151,42 @@ app.get("/players", async (_req, res) => {
       ORDER BY p.updated_at DESC
     `);
 
-    const players = result.rows.map(r => ({
-      id: r.id,
-      name: r.name,
-      alliance: r.alliance,
-      race: r.race,
-      army: r.army,
-      rank: r.rank,
-      tiv: r.tiv,
-      updated_at: r.updated_at,
-      ...(r.snapshot || {})
-    }));
+    // helper: remap DB snake_case → client camelCase
+    function toCamel(r) {
+      return {
+        id: r.id,
+        name: r.name,
+        alliance: r.alliance,
+        race: r.race,
+        army: r.army,
+        rank: r.rank,
+        tiv: r.tiv,
+        updatedAt: r.updated_at,
 
+        // remap known stats
+        strikeAction: r.strike_action,
+        defensiveAction: r.defensive_action,
+        spyRating: r.spy_rating,
+        sentryRating: r.sentry_rating,
+        poisonRating: r.poison_rating,
+        antidoteRating: r.antidote_rating,
+        theftRating: r.theft_rating,
+        vigilanceRating: r.vigilance_rating,
+        economy: r.economy,
+        xpPerTurn: r.xp_per_turn,
+        turnsAvailable: r.turns_available,
+        treasury: r.treasury,
+        projectedIncome: r.projected_income,
+
+        // include anything extra from snapshot JSON
+        ...(r.snapshot || {})
+      };
+    }
+
+    const players = result.rows.map(toCamel);
     res.json(players);
   } catch (err) {
-    console.error("❌ /players query failed", err.message);
+    console.error("❌ /players query failed", err);
     res.status(500).json({ error: "DB error" });
   }
 });
