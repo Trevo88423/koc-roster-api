@@ -1,18 +1,30 @@
 // ==UserScript==
 // @name         KoC Data Centre
 // @namespace    trevo88423
-// @version      1.5.1
-// @description  Unified script: Tracks TIV + recon stats (Battlefield, Attack, Armory, Recon). Provides roster dashboards with multi-tab views: Roster, Top TIV, All Stats. Adds XP → Attacks Turn Trading Calculator (Sidebar, Popup, Attack Log, Recon).
+// @version      1.5.3
+// @description  Unified script: Tracks TIV + recon stats (Battlefield, Attack, Armory, Recon, Base).
+//               Syncs player + TIV data to API. Provides roster dashboards with multi-tab views:
+//               Roster, Top TIV, All Stats. Adds XP → Attack Turn trading calculator (Sidebar, Popup, Attack Log, Recon).
 // @author       Trevor & ChatGPT
 // @match        https://www.kingsofchaos.com/*
+// @icon         https://www.kingsofchaos.com/favicon.ico
+// @grant        none
 // @updateURL    https://raw.githubusercontent.com/Trevo88423/koc-roster-api/main/userscripts/KoC-DataCentre.user.js
 // @downloadURL  https://raw.githubusercontent.com/Trevo88423/koc-roster-api/main/userscripts/KoC-DataCentre.user.js
-// @grant        none
 // ==/UserScript==
+
 
 (function() {
   'use strict';
-  console.log("✅ DataCentre+XPTool v1.5.0 loaded on", location.pathname);
+
+  // Grab version from @version in the header (via Tampermonkey GM_info)
+  const ver = (typeof GM_info !== "undefined" && GM_info.script && GM_info.script.version)
+              ? GM_info.script.version
+              : "dev";
+
+  console.log(`✅ DataCentre+XPTool v${ver} loaded on`, location.pathname);
+
+
 
   // =========================
   // === Storage Helpers   ===
@@ -20,6 +32,31 @@
 
   const TIV_KEY = "KoC_DataCentre"; // attack/armory TIV logs
   const MAP_KEY = "KoC_NameMap";    // latest player snapshot by id
+  const API_URL = "https://koc-roster-api-production.up.railway.app";
+  const API_TOKEN = "tiv_4P7Z-pnPz2zvJ8rGgU5x";
+
+ function sendToAPI(endpoint, data) {
+  console.log(`🌐 Preparing API call → ${endpoint}`, data);
+
+  fetch(`${API_URL}/${endpoint}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer " + API_TOKEN
+    },
+    body: JSON.stringify(data)
+  })
+  .then(async r => {
+    let json;
+    try { json = await r.json(); } catch { json = { error: "Invalid JSON response" }; }
+    console.log(`🌐 API response from ${endpoint}:`, json);
+    return json;
+  })
+  .catch(err => {
+    console.error(`❌ API call failed → ${endpoint}`, err);
+  });
+}
+
 
   function getTivLog() {
     const raw = localStorage.getItem(TIV_KEY) || "[]";
@@ -37,15 +74,43 @@
     localStorage.setItem(MAP_KEY, JSON.stringify(map));
   }
 
-  // Merge patch into player record
-  function updatePlayerInfo(id, patch) {
-    if (!id) return;
-    const map = getNameMap();
-    const prev = map[id] || {};
-    map[id] = { ...prev, ...patch, lastSeen: new Date().toISOString() };
-    saveNameMap(map);
+ function updatePlayerInfo(id, patch) {
+  if (!id) return;
+  const map = getNameMap();
+  const prev = map[id] || {};
+
+  // Clean out blanks from the new patch
+  const cleanPatch = {};
+  for (const [k, v] of Object.entries(patch)) {
+    if (v !== "Unknown" && v !== "" && v != null) {
+      cleanPatch[k] = v;
+    }
   }
-    // =========================
+
+  // Merge old + new
+  const updated = { ...prev, ...cleanPatch, lastSeen: new Date().toISOString() };
+  map[id] = updated;
+  saveNameMap(map);
+
+  // Only send if something changed
+  const prevJson = JSON.stringify(prev);
+  const newJson  = JSON.stringify(updated);
+  if (prevJson !== newJson) {
+    // 🔥 Send the *merged record* (so API sees full context),
+    // but with blanks stripped out
+    const apiPayload = {};
+    for (const [k, v] of Object.entries(updated)) {
+      if (v !== "Unknown" && v !== "" && v != null) {
+        apiPayload[k] = v;
+      }
+    }
+    sendToAPI("players", { id, ...apiPayload });
+  }
+}
+
+
+
+// =========================
 // === Alliance Restriction
 // =========================
 const myId = localStorage.getItem("KoC_MyId");
@@ -433,69 +498,102 @@ function addMaxAttacksRecon() {
 }
 
 
-
-  // =========================
-  // === Battlefield Collector
-  // =========================
-  function collectFromBattlefield() {
-    const rows = document.querySelectorAll("tr[user_id]");
-    const players = [...rows].map(row => {
-      const id = row.getAttribute("user_id");
-      const cells = row.querySelectorAll("td");
-      return {
-        id,
-        name:     cells[2]?.innerText.trim() || "Unknown",
-        alliance: cells[1]?.innerText.trim() || "",
-        army:     cells[3]?.innerText.trim() || "",
-        race:     cells[4]?.innerText.trim() || "",
-        treasury: cells[5]?.innerText.trim() || "",
-        recon:    cells[6]?.innerText.trim() || "",
-        rank:     cells[7]?.innerText.trim() || ""
-      };
-    });
-
-    if (players.length) {
-      players.forEach(p => updatePlayerInfo(p.id, p));
-      console.log(`[DataCentre] Captured ${players.length} players`);
-    }
-  }
-
-  if (location.pathname.includes("battlefield.php")) {
-    collectFromBattlefield();
-    const table = document.querySelector("table.battlefield") || document.querySelector("table.table_lines");
-    if (table) {
-      const observer = new MutationObserver(() => collectFromBattlefield());
-      observer.observe(table, { childList: true, subtree: true });
-      console.log("[DataCentre] Battlefield observer active");
-    }
-  }
-
-  // =========================
-  // === Attack TIV Collector
-  // =========================
-  function collectTIVFromAttackPage() {
-    const idMatch  = location.search.match(/id=(\d+)/);
-    const tivMatch = document.body.textContent.match(/Total Invested Value:\s*\(([\d,]+)\)/i);
-    if (!idMatch || !tivMatch) return;
-
-    const id  = idMatch[1];
-    const tiv = parseInt(tivMatch[1].replace(/,/g, ""), 10);
-    const now = new Date().toISOString();
-
-    const log = getTivLog();
-    log.push({ id, tiv, time: now });
-    saveTivLog(log);
-
-    updatePlayerInfo(id, { tiv, lastTivTime: now });
-
-    console.log("📊 Attack TIV saved", { id, tiv });
-  }
-
-  if (location.pathname.includes("attack.php")) {
-    collectTIVFromAttackPage();
-  }
 // =========================
-// === Base Page Collector (Self ID + Economy Stats) ===
+// === Battlefield Collector
+// =========================
+function collectFromBattlefield() {
+  const rows = document.querySelectorAll("tr[user_id]");
+  const players = [...rows].map(row => {
+    const id = row.getAttribute("user_id");
+    const cells = row.querySelectorAll("td");
+    return {
+      id,
+      name:     cells[2]?.innerText.trim() || "Unknown",
+      alliance: cells[1]?.innerText.trim() || "",
+      army:     cells[3]?.innerText.trim() || "",
+      race:     cells[4]?.innerText.trim() || "",
+      treasury: cells[5]?.innerText.trim() || "",
+      recon:    cells[6]?.innerText.trim() || "",
+      rank:     cells[7]?.innerText.trim() || ""
+    };
+  });
+
+  if (players.length) {
+    players.forEach(p => updatePlayerInfo(p.id, p));
+    console.log(`[DataCentre] Captured ${players.length} players`);
+  }
+}
+
+if (location.pathname.includes("battlefield.php")) {
+  collectFromBattlefield();
+  const table = document.querySelector("table.battlefield") || document.querySelector("table.table_lines");
+  if (table) {
+    const observer = new MutationObserver(() => collectFromBattlefield());
+    observer.observe(table, { childList: true, subtree: true });
+    console.log("[DataCentre] Battlefield observer active");
+  }
+}
+
+
+  // =========================
+// === Attack TIV Collector
+// =========================
+function collectTIVFromAttackPage() {
+  const idMatch  = location.search.match(/id=(\d+)/);
+  const tivMatch = document.body.textContent.match(/Total Invested Value:\s*\(([\d,]+)\)/i);
+  if (!idMatch || !tivMatch) return;
+
+  const id  = idMatch[1];
+  const tiv = parseInt(tivMatch[1].replace(/,/g, ""), 10);
+  const now = new Date().toISOString();
+
+  // === Save locally ===
+  const log = getTivLog();
+  log.push({ id, tiv, time: now });
+  saveTivLog(log);
+
+  updatePlayerInfo(id, { tiv, lastTivTime: now });
+
+  console.log("📊 Attack TIV saved", { id, tiv });
+
+  // === Push to API ===
+  sendToAPI("tiv", { playerId: id, tiv });
+}
+
+if (location.pathname.includes("attack.php")) {
+  collectTIVFromAttackPage();
+}
+// --- Helper: Military Stats Parser (RB-style) ---
+function collectMilitaryStats() {
+  const header = document.evaluate(
+    `.//th[contains(., "Military Effectiveness")]`,
+    document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null
+  ).singleNodeValue;
+  if (!header) return {};
+
+  const table = header.closest("table");
+  const stats = {};
+  table.querySelectorAll("tr").forEach(row => {
+    const cells = row.querySelectorAll("td");
+    if (cells.length < 2) return;
+
+    const label = cells[0].innerText.trim().toLowerCase();
+    const value = cells[1].innerText.trim();
+
+    if (label.startsWith("strike"))    stats.strikeAction    = value;
+    if (label.startsWith("defense"))   stats.defensiveAction = value;
+    if (label.startsWith("spy"))       stats.spyRating       = value;
+    if (label.startsWith("sentry"))    stats.sentryRating    = value;
+    if (label.startsWith("poison"))    stats.poisonRating    = value;
+    if (label.startsWith("antidote"))  stats.antidoteRating  = value;
+    if (label.startsWith("theft"))     stats.theftRating     = value;
+    if (label.startsWith("vigilance")) stats.vigilanceRating = value;
+  });
+  return stats;
+}
+
+// =========================
+// === Base Page Collector (Self ID + Economy + Military Stats) ===
 // =========================
 function collectFromBasePage() {
   let myId = localStorage.getItem("KoC_MyId");
@@ -511,8 +609,9 @@ function collectFromBasePage() {
     console.log("📊 Stored my KoC ID/Name:", myId, myName);
   }
 
-  let projectedIncome = 0, treasury = 0, economy = 0, xpPerTurn = 0, turnsAvailable = 0;
+  let projectedIncome, treasury, economy, xpPerTurn, turnsAvailable;
 
+  // --- Economy / Treasury block ---
   const rows = [...document.querySelectorAll("tr")];
   rows.forEach(tr => {
     const txt = tr.innerText.trim();
@@ -521,10 +620,7 @@ function collectFromBasePage() {
       const match = txt.match(/([\d,]+)\s+Gold/);
       if (match) projectedIncome = parseInt(match[1].replace(/,/g, ""), 10);
     }
-    if (txt.startsWith("Treasury")) {
-      const match = txt.match(/([\d,]+)\s+Gold/);
-      if (match) treasury = parseInt(match[1].replace(/,/g, ""), 10);
-    }
+
     if (txt.startsWith("Economy")) {
       const match = txt.match(/([\d,]+)/);
       if (match) economy = parseInt(match[1].replace(/,/g, ""), 10);
@@ -533,34 +629,58 @@ function collectFromBasePage() {
       const match = txt.match(/([\d,]+)/);
       if (match) xpPerTurn = parseInt(match[1].replace(/,/g, ""), 10);
     }
-    if (txt.startsWith("Turns Available")) {
-      const match = txt.match(/([\d,]+)/);
-      if (match) turnsAvailable = parseInt(match[1].replace(/,/g, ""), 10);
-    }
   });
 
-  updatePlayerInfo(myId, {
+  // --- Military Effectiveness block (RB-style parser) ---
+  const stats = {};
+  const header = document.evaluate(
+    `.//th[contains(., "Military Effectiveness")]`,
+    document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null
+  ).singleNodeValue;
+
+  if (header) {
+    const table = header.closest("table");
+    table.querySelectorAll("tr").forEach(row => {
+      const cells = row.querySelectorAll("td");
+      if (cells.length < 2) return;
+
+      const label = cells[0].innerText.trim().toLowerCase();
+      const value = cells[1].innerText.trim();
+
+      if (label.startsWith("strike"))    stats.strikeAction    = value;
+      if (label.startsWith("defense"))   stats.defensiveAction = value;
+      if (label.startsWith("spy"))       stats.spyRating       = value;
+      if (label.startsWith("sentry"))    stats.sentryRating    = value;
+      if (label.startsWith("poison"))    stats.poisonRating    = value;
+      if (label.startsWith("antidote"))  stats.antidoteRating  = value;
+      if (label.startsWith("theft"))     stats.theftRating     = value;
+      if (label.startsWith("vigilance")) stats.vigilanceRating = value;
+    });
+  }
+
+  const payload = {
     name: myName,
     projectedIncome,
     treasury,
     economy,
     xpPerTurn,
     turnsAvailable,
+    ...stats,
     lastSeen: new Date().toISOString()
-  });
+  };
 
-  console.log("📊 Base.php self stats captured", {
-    projectedIncome,
-    treasury,
-    economy,
-    xpPerTurn,
-    turnsAvailable
-  });
+  // === Save locally ===
+  updatePlayerInfo(myId, payload);
+  console.log("📊 Base.php self stats captured", payload);
+
+  // === Push to API ===
+  sendToAPI("players", { id: myId, ...payload });
 }
 
 if (location.pathname.includes("base.php")) {
   collectFromBasePage();
 }
+
 
 // =========================
 // === Armory Self Collector (TIV + Military Stats) ===
@@ -600,16 +720,24 @@ function collectTIVAndStatsFromArmory() {
     const log = getTivLog();
     log.push({ id: myId, tiv, time: now });
     saveTivLog(log);
+
+    // 🔥 Send TIV to API
+    sendToAPI("tiv", { playerId: myId, tiv });
   }
 
-  // Merge into NameMap
-  updatePlayerInfo(myId, {
+  // Merge into NameMap + API push
+  const payload = {
     name: myName,
     tiv,
     ...stats,
     lastTivTime: now,
     lastRecon: now
-  });
+  };
+
+  updatePlayerInfo(myId, payload);
+
+  // 🔥 Send self stats to API
+  sendToAPI("players", { id: myId, ...payload });
 
   console.log("📊 Armory self stats captured", { id: myId, name: myName, tiv, ...stats });
 }
@@ -681,15 +809,25 @@ function collectFromReconPage() {
   set("attackTurns",        ms?.[22]);
   set("experience",         ms?.[23]);
 
-  // Treasury values are always visible — just overwrite directly
+  // Treasury values
   stats.treasury = treasury?.[1]?.cells[0]?.innerText.split(" ")[0];
   stats.projectedIncome = treasury?.[3]?.innerText.split(" Gold")[0];
 
+  // === Save locally ===
   updatePlayerInfo(id, stats);
   console.log("📊 Recon data saved", stats);
 
+  // === Push to API (logging happens inside sendToAPI) ===
+  sendToAPI("players", { id, ...stats });
+  if (stats.tiv) {
+    sendToAPI("tiv", { playerId: id, tiv: stats.tiv });
+  }
+
   enhanceReconUI(id);
 }
+
+
+
 
 // =========================
 // === Recon UI Enhancer ===
@@ -782,13 +920,40 @@ if (location.pathname.includes("datacentre")) {
     </div>
   `;
 
-  // ======================================
-  // === Data Access (localStorage maps) ===
-  // ======================================
-  const nameMap = (localStorage.getItem("KoC_NameMap") ? JSON.parse(localStorage.getItem("KoC_NameMap")) : {});
-  const tivLog  = (localStorage.getItem("KoC_DataCentre") ? JSON.parse(localStorage.getItem("KoC_DataCentre")) : []);
-  const lastTiv = {};
-  tivLog.forEach(r => { lastTiv[r.id] = r; });
+// ======================================
+// === Data Access (API + local fallback) ===
+// ======================================
+const API_URL = "https://koc-roster-api-production.up.railway.app";
+const API_TOKEN = "tiv_4P7Z-pnPz2zvJ8rGgU5x";
+
+async function loadPlayers() {
+  try {
+    const resp = await fetch(`${API_URL}/players`, {
+      headers: { "Authorization": "Bearer " + API_TOKEN }
+    });
+    if (!resp.ok) throw new Error("API error " + resp.status);
+    const players = await resp.json();
+    console.log("🌐 Loaded players from API:", players);
+    return players;
+  } catch (err) {
+    console.error("❌ API fetch failed, falling back to localStorage", err);
+    const nameMap = JSON.parse(localStorage.getItem("KoC_NameMap") || "{}");
+    return Object.values(nameMap);
+  }
+}
+
+let rosterCache = []; // holds API or fallback data
+
+async function initRosterData() {
+  rosterCache = await loadPlayers();
+}
+
+// TIV log stays local-only for now
+const tivLog  = JSON.parse(localStorage.getItem("KoC_DataCentre") || "[]");
+const lastTiv = {};
+tivLog.forEach(r => { lastTiv[r.id] = r; });
+
+
 
   // ==========================
   // === Utility Functions  ===
@@ -899,80 +1064,89 @@ function renderTable(containerId, columns, rows, defaultSortKey = null, defaultS
     return new Date(Math.max(...times));
   }
 
-  function prepareRosterRows() {
-    let rows = Object.entries(nameMap)
-      .filter(([id, info]) => id !== "self" && info.name !== "Me")
-      .map(([id, info]) => {
-        const tivRec = lastTiv[id];
-        const isStale = t => t && (Date.now() - new Date(t).getTime()) > 86400000;
-        const fmt = (val, time) => {
-          if (!val || val === "—") return "—";
-          return isStale(time) ? `<i>${val}</i>` : val;
-        };
+ function prepareRosterRows() {
+  let rows = rosterCache
+    .filter(info => info.id !== "self" && info.name !== "Me")
+    .map(info => {
+      const id = info.id;
+      const tivRec = lastTiv[id] || {};
+      const tivNum = typeof info.tiv === "number" ? info.tiv : (tivRec.tiv || 0);
 
-        return {
-          rank: info.rank || "",
-          name: `<a href="https://www.kingsofchaos.com/attack.php?id=${id}" target="_blank">${info.name || "Unknown"}</a>`,
-          alliance: info.alliance || "",
-          army: info.army || "",
-          race: info.race || "",
-          tiv: fmt((typeof info.tiv === "number" ? info.tiv : (tivRec?.tiv || 0)).toLocaleString(), info.lastTivTime || tivRec?.time),
-          strike: fmt(info.strikeAction, info.strikeActionTime),
-          defense: fmt(info.defensiveAction, info.defensiveActionTime),
-          spy: fmt(info.spyRating, info.spyRatingTime),
-          sentry: fmt(info.sentryRating, info.sentryRatingTime),
-          poison: fmt(info.poisonRating, info.poisonRatingTime),
-          antidote: fmt(info.antidoteRating, info.antidoteRatingTime),
-          theft: fmt(info.theftRating, info.theftRatingTime),
-          vigilance: fmt(info.vigilanceRating, info.vigilanceRatingTime),
-          lastSeen: timeAgo(info.lastSeen || tivRec?.time)
-        };
-      });
-    rows.sort((a, b) => toNum(a.rank) - toNum(b.rank));
-    return rows;
-  }
+      const isStale = t => t && (Date.now() - new Date(t).getTime()) > 86400000;
+      const fmt = (val, time) => {
+        if (!val || val === "—" || val == null) return "—";
+        return isStale(time) ? `<i>${val}</i>` : val;
+      };
+
+      return {
+        rank: info.rank || "",
+        name: `<a href="https://www.kingsofchaos.com/attack.php?id=${id}" target="_blank">${info.name || "Unknown"}</a>`,
+        alliance: info.alliance || "",
+        army: info.army || "",
+        race: info.race || "",
+        tiv: fmt(tivNum.toLocaleString(), info.lastTivTime || tivRec.time),
+        strike: fmt(info.strikeAction ?? tivRec.strikeAction, info.strikeActionTime || tivRec.time),
+        defense: fmt(info.defensiveAction ?? tivRec.defensiveAction, info.defensiveActionTime || tivRec.time),
+        spy: fmt(info.spyRating ?? tivRec.spyRating, info.spyRatingTime || tivRec.time),
+        sentry: fmt(info.sentryRating ?? tivRec.sentryRating, info.sentryRatingTime || tivRec.time),
+        poison: fmt(info.poisonRating ?? tivRec.poisonRating, info.poisonRatingTime || tivRec.time),
+        antidote: fmt(info.antidoteRating ?? tivRec.antidoteRating, info.antidoteRatingTime || tivRec.time),
+        theft: fmt(info.theftRating ?? tivRec.theftRating, info.theftRatingTime || tivRec.time),
+        vigilance: fmt(info.vigilanceRating ?? tivRec.vigilanceRating, info.vigilanceRatingTime || tivRec.time),
+        lastSeen: timeAgo(info.lastSeen || tivRec.time)
+      };
+    });
+
+  rows.sort((a, b) => toNum(a.rank) - toNum(b.rank));
+  return rows;
+}
 
   function prepareTopTivRows(limit = 20) {
-    let rows = Object.entries(nameMap)
-      .filter(([id, info]) => id !== "self" && info.name !== "Me")
-      .map(([id, info]) => {
-        const tivRec = lastTiv[id];
-        const tivNum = (typeof info.tiv === "number" ? info.tiv : (tivRec?.tiv || 0));
-        return {
-          name: `<a href="https://www.kingsofchaos.com/attack.php?id=${id}" target="_blank">${info.name || "Unknown"}</a>`,
-          tiv: tivNum.toLocaleString(),
-          updated: timeAgo(info.lastSeen || tivRec?.time)
-        };
-      });
-    rows.sort((a, b) => toNum(b.tiv) - toNum(a.tiv));
-    if (limit > 0) rows = rows.slice(0, limit);
-    return rows;
-  }
+  let rows = rosterCache
+    .filter(info => info.id !== "self" && info.name !== "Me")
+    .map(info => {
+      const id = info.id;
+      const tivRec = lastTiv[id];
+      const tivNum = (typeof info.tiv === "number" ? info.tiv : (tivRec?.tiv || 0));
+      return {
+        name: `<a href="https://www.kingsofchaos.com/attack.php?id=${id}" target="_blank">${info.name || "Unknown"}</a>`,
+        tiv: tivNum.toLocaleString(),
+        updated: timeAgo(info.lastSeen || tivRec?.time)
+      };
+    });
+  rows.sort((a, b) => toNum(b.tiv) - toNum(a.tiv));
+  if (limit > 0) rows = rows.slice(0, limit);
+  return rows;
+}
 
-  function prepareAllStatsRows(limit = 10) {
-    let rows = Object.entries(nameMap)
-      .filter(([id, info]) => !!info.strikeAction)
-      .map(([id, info]) => {
-        const tivRec = lastTiv[id];
-        const tivNum = (typeof info.tiv === "number" ? info.tiv : (tivRec?.tiv || 0));
-        return {
-          name: `<a href="https://www.kingsofchaos.com/attack.php?id=${id}" target="_blank">${info.name || "Unknown"}</a>`,
-          tiv: tivNum.toLocaleString(),
-          strike: info.strikeAction || "—",
-          defense: info.defensiveAction || "—",
-          spy: info.spyRating || "—",
-          sentry: info.sentryRating || "—",
-          poison: info.poisonRating || "—",
-          antidote: info.antidoteRating || "—",
-          theft: info.theftRating || "—",
-          vigilance: info.vigilanceRating || "—",
-          lastRecon: timeAgo(getLatestReconTime(info))
-        };
-      });
-    rows.sort((a, b) => toNum(b.tiv) - toNum(a.tiv));
-    if (limit > 0) rows = rows.slice(0, limit);
-    return rows;
-  }
+
+function prepareAllStatsRows(limit = 10) {
+  let rows = rosterCache
+    .filter(info => !!info.strikeAction) // only players we’ve got recon/armory stats for
+    .map(info => {
+      const id = info.id;
+      const tivRec = lastTiv[id];
+      const tivNum = (typeof info.tiv === "number" ? info.tiv : (tivRec?.tiv || 0));
+      return {
+        name: `<a href="https://www.kingsofchaos.com/attack.php?id=${id}" target="_blank">${info.name || "Unknown"}</a>`,
+        tiv: tivNum.toLocaleString(),
+        strike: info.strikeAction || "—",
+        defense: info.defensiveAction || "—",
+        spy: info.spyRating || "—",
+        sentry: info.sentryRating || "—",
+        poison: info.poisonRating || "—",
+        antidote: info.antidoteRating || "—",
+        theft: info.theftRating || "—",
+        vigilance: info.vigilanceRating || "—",
+        lastRecon: timeAgo(getLatestReconTime(info))
+      };
+    });
+
+  rows.sort((a, b) => toNum(b.tiv) - toNum(a.tiv));
+  if (limit > 0) rows = rows.slice(0, limit);
+  return rows;
+}
+
 
   // ============================
   // === Render Each Tab View ===
@@ -1020,15 +1194,15 @@ function renderAllStats(limit = 10) {
     {key:"antidote", label:"Antidote"},
     {key:"theft", label:"Theft"},
     {key:"vigilance", label:"Vigilance"},
-    {key:"rank", label:"Rank"}   // 👈 new
+    {key:"rank", label:"Rank"}
   ];
 
   // === Remember previous selection (if exists) ===
   const prevAlliance = document.getElementById("allStatsAlliance")?.value || "";
   const prevLimit = document.getElementById("allStatsLimit")?.value || limit;
 
-  // === Build unique alliance list ===
-  const alliances = [...new Set(Object.values(nameMap)
+  // === Build unique alliance list from rosterCache ===
+  const alliances = [...new Set(rosterCache
     .map(info => info.alliance)
     .filter(a => a && a.trim() !== ""))]
     .sort();
@@ -1061,9 +1235,10 @@ function renderAllStats(limit = 10) {
 
   // === Loop through statDefs and build tables ===
   statDefs.forEach(stat => {
-    let rows = Object.entries(nameMap)
-      .filter(([id, info]) => (stat.key==="tiv" || stat.key==="rank") || !!info.strikeAction)
-      .map(([id, info]) => {
+    let rows = rosterCache
+      .filter(info => (stat.key==="tiv" || stat.key==="rank") || !!info.strikeAction)
+      .map(info => {
+        const id = info.id;
         const tivRec = lastTiv[id];
         const tivNum = (typeof info.tiv === "number" ? info.tiv : (tivRec?.tiv || 0));
 
@@ -1147,25 +1322,29 @@ function renderAllStats(limit = 10) {
   });
 }
 
-
-  // Initial render = Roster tab
+// ============================
+// === Load + Render Default ===
+// ============================
+initRosterData().then(() => {
   renderRoster();
+});
 
-  // ============================
-  // === Tab Switching Logic  ===
-  // ============================
-  document.querySelectorAll("#tabBar button").forEach(btn => {
-    btn.addEventListener("click", () => {
-      const target = btn.dataset.tab;
-      document.getElementById("viewRoster").style.display   = (target==="roster")   ? "" : "none";
-      document.getElementById("viewTopTiv").style.display   = (target==="topTiv")   ? "" : "none";
-      document.getElementById("viewAllStats").style.display = (target==="allStats") ? "" : "none";
 
-      if (target==="roster") renderRoster();
-      if (target==="topTiv") renderTopTiv();
-      if (target==="allStats") renderAllStats(10);
-    });
+// ============================
+// === Tab Switching Logic  ===
+// ============================
+document.querySelectorAll("#tabBar button").forEach(btn => {
+  btn.addEventListener("click", () => {
+    const target = btn.dataset.tab;
+    document.getElementById("viewRoster").style.display   = (target==="roster")   ? "" : "none";
+    document.getElementById("viewTopTiv").style.display   = (target==="topTiv")   ? "" : "none";
+    document.getElementById("viewAllStats").style.display = (target==="allStats") ? "" : "none";
+
+    if (target==="roster") renderRoster();
+    if (target==="topTiv") renderTopTiv();
+    if (target==="allStats") renderAllStats(10);
   });
+});
 }
 
 
