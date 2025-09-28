@@ -64,7 +64,13 @@ app.post("/players", async (req, res) => {
       `INSERT INTO players (id, name, alliance, race, army, rank, tiv, updated_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())
        ON CONFLICT (id) DO UPDATE
-         SET name=$2, alliance=$3, race=$4, army=$5, rank=$6, tiv=$7, updated_at=NOW()`,
+         SET name     = COALESCE(EXCLUDED.name, players.name),
+             alliance = COALESCE(EXCLUDED.alliance, players.alliance),
+             race     = COALESCE(EXCLUDED.race, players.race),
+             army     = COALESCE(EXCLUDED.army, players.army),
+             rank     = COALESCE(EXCLUDED.rank, players.rank),
+             tiv      = COALESCE(EXCLUDED.tiv, players.tiv),
+             updated_at = NOW()`,
       [id, fields.name || null, fields.alliance || null, fields.race || null,
        fields.army || null, fields.rank || null, fields.tiv || null]
     );
@@ -77,13 +83,13 @@ app.post("/players", async (req, res) => {
 
     res.json({ ok: true, id });
   } catch (err) {
-    console.error(err);
+    console.error("❌ /players insert failed", err.message);
     res.status(500).json({ error: "DB error" });
   }
 });
 
 // --- Get all players (latest data merged with snapshot) ---
-app.get("/players", async (req, res) => {
+app.get("/players", async (_req, res) => {
   try {
     const result = await pool.query(`
       SELECT p.id, p.name, p.alliance, p.race, p.army, p.rank, p.tiv, p.updated_at,
@@ -99,7 +105,6 @@ app.get("/players", async (req, res) => {
       ORDER BY p.updated_at DESC
     `);
 
-    // Merge snapshot JSON into flat player object
     const players = result.rows.map(r => ({
       id: r.id,
       name: r.name,
@@ -109,26 +114,53 @@ app.get("/players", async (req, res) => {
       rank: r.rank,
       tiv: r.tiv,
       updated_at: r.updated_at,
-      ...(r.snapshot || {}) // unpack recon/base/armory fields
+      ...(r.snapshot || {})
     }));
 
     res.json(players);
   } catch (err) {
-    console.error("❌ /players query failed", err);
+    console.error("❌ /players query failed", err.message);
     res.status(500).json({ error: "DB error" });
   }
 });
-// Get single player
+
+// --- Get single player (merged with latest snapshot) ---
 app.get("/players/:id", async (req, res) => {
   try {
-    const result = await pool.query("SELECT * FROM players WHERE id=$1", [req.params.id]);
+    const result = await pool.query(`
+      SELECT p.id, p.name, p.alliance, p.race, p.army, p.rank, p.tiv, p.updated_at,
+             s.data AS snapshot
+      FROM players p
+      LEFT JOIN LATERAL (
+        SELECT data
+        FROM player_snapshots s
+        WHERE s.player_id = p.id
+        ORDER BY s.time DESC
+        LIMIT 1
+      ) s ON true
+      WHERE p.id = $1
+    `, [req.params.id]);
+
     if (!result.rows.length) return res.status(404).json({ error: "Not found" });
-    res.json(result.rows[0]);
+
+    const r = result.rows[0];
+    res.json({
+      id: r.id,
+      name: r.name,
+      alliance: r.alliance,
+      race: r.race,
+      army: r.army,
+      rank: r.rank,
+      tiv: r.tiv,
+      updated_at: r.updated_at,
+      ...(r.snapshot || {})
+    });
   } catch (err) {
-    console.error(err);
+    console.error("❌ /players/:id query failed", err.message);
     res.status(500).json({ error: "DB error" });
   }
 });
+
 // --- Get all snapshots for a player ---
 app.get("/snapshots/:id", async (req, res) => {
   const { id } = req.params;
@@ -139,7 +171,7 @@ app.get("/snapshots/:id", async (req, res) => {
     );
     res.json({ player_id: id, snapshots: result.rows });
   } catch (err) {
-    console.error(err);
+    console.error("❌ /snapshots query failed", err.message);
     res.status(500).json({ error: "DB error" });
   }
 });
@@ -153,7 +185,7 @@ app.post("/tiv", async (req, res) => {
     await pool.query("INSERT INTO tiv_logs (player_id, tiv) VALUES ($1,$2)", [playerId, tiv]);
     res.json({ ok: true });
   } catch (err) {
-    console.error(err);
+    console.error("❌ /tiv insert failed", err.message);
     res.status(500).json({ error: "DB error" });
   }
 });
@@ -167,12 +199,13 @@ app.get("/tiv/:id", async (req, res) => {
     );
     res.json(result.rows);
   } catch (err) {
-    console.error(err);
+    console.error("❌ /tiv query failed", err.message);
     res.status(500).json({ error: "DB error" });
   }
 });
-// --- Plain Roster Page ---
-app.get("/roster", async (req, res) => {
+
+// --- Plain Roster Page (debug) ---
+app.get("/roster", async (_req, res) => {
   try {
     const result = await pool.query("SELECT * FROM players ORDER BY updated_at DESC");
 
@@ -208,7 +241,7 @@ app.get("/roster", async (req, res) => {
     `;
     res.send(html);
   } catch (err) {
-    console.error(err);
+    console.error("❌ /roster query failed", err.message);
     res.status(500).send("Error loading roster");
   }
 });
