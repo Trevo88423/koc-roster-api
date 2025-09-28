@@ -82,17 +82,42 @@ app.post("/players", async (req, res) => {
   }
 });
 
-// Get all players
-app.get("/players", async (_req, res) => {
+// --- Get all players (latest data merged with snapshot) ---
+app.get("/players", async (req, res) => {
   try {
-    const result = await pool.query("SELECT * FROM players ORDER BY updated_at DESC");
-    res.json(result.rows);
+    const result = await pool.query(`
+      SELECT p.id, p.name, p.alliance, p.race, p.army, p.rank, p.tiv, p.updated_at,
+             s.data AS snapshot
+      FROM players p
+      LEFT JOIN LATERAL (
+        SELECT data
+        FROM player_snapshots s
+        WHERE s.player_id = p.id
+        ORDER BY s.time DESC
+        LIMIT 1
+      ) s ON true
+      ORDER BY p.updated_at DESC
+    `);
+
+    // Merge snapshot JSON into flat player object
+    const players = result.rows.map(r => ({
+      id: r.id,
+      name: r.name,
+      alliance: r.alliance,
+      race: r.race,
+      army: r.army,
+      rank: r.rank,
+      tiv: r.tiv,
+      updated_at: r.updated_at,
+      ...(r.snapshot || {}) // unpack recon/base/armory fields
+    }));
+
+    res.json(players);
   } catch (err) {
-    console.error(err);
+    console.error("❌ /players query failed", err);
     res.status(500).json({ error: "DB error" });
   }
 });
-
 // Get single player
 app.get("/players/:id", async (req, res) => {
   try {
