@@ -79,7 +79,7 @@ app.post("/tiv", requireAuth, async (req, res) => {
   try {
     const { playerId, tiv } = req.body;
     await pool.query(
-      "INSERT INTO tiv_log (player_id, tiv, time) VALUES ($1, $2, NOW())",
+      "INSERT INTO tiv_logs (player_id, tiv, time) VALUES ($1, $2, NOW())",
       [playerId, tiv]
     );
     res.json({ ok: true });
