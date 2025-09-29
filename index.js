@@ -53,28 +53,67 @@ app.get("/players", requireAuth, async (req, res) => {
   }
 });
 
+// --- Upsert player with full stats, skipping blanks ---
 app.post("/players", requireAuth, async (req, res) => {
   try {
-    const { id, name, alliance, army, race } = req.body;
-    const { rows } = await pool.query(
-      `INSERT INTO players (id, name, alliance, army, race, updated_at)
-       VALUES ($1, $2, $3, $4, $5, NOW())
-       ON CONFLICT (id) DO UPDATE SET
-         name = EXCLUDED.name,
-         alliance = EXCLUDED.alliance,
-         army = EXCLUDED.army,
-         race = EXCLUDED.race,
-         updated_at = NOW()
-       RETURNING *`,
-      [id, name, alliance, army, race]
+    const {
+      id, name, alliance, army, race, rank, tiv,
+      strikeAction, defensiveAction, spyRating, sentryRating,
+      poisonRating, antidoteRating, theftRating, vigilanceRating,
+      economy, xpPerTurn, turnsAvailable, treasury, projectedIncome
+    } = req.body;
+
+    const { rows } = await pool.query(`
+      INSERT INTO players (
+        id, name, alliance, army, race, rank, tiv,
+        strike_action, defensive_action, spy_rating, sentry_rating,
+        poison_rating, antidote_rating, theft_rating, vigilance_rating,
+        economy, xp_per_turn, turns_available, treasury, projected_income,
+        updated_at
+      )
+      VALUES (
+        $1,$2,$3,$4,$5,$6,$7,
+        $8,$9,$10,$11,
+        $12,$13,$14,$15,
+        $16,$17,$18,$19,$20,
+        NOW()
+      )
+      ON CONFLICT (id) DO UPDATE SET
+        name = COALESCE(EXCLUDED.name, players.name),
+        alliance = COALESCE(EXCLUDED.alliance, players.alliance),
+        army = COALESCE(EXCLUDED.army, players.army),
+        race = COALESCE(EXCLUDED.race, players.race),
+        rank = COALESCE(EXCLUDED.rank, players.rank),
+        tiv = COALESCE(EXCLUDED.tiv, players.tiv),
+        strike_action = COALESCE(EXCLUDED.strike_action, players.strike_action),
+        defensive_action = COALESCE(EXCLUDED.defensive_action, players.defensive_action),
+        spy_rating = COALESCE(EXCLUDED.spy_rating, players.spy_rating),
+        sentry_rating = COALESCE(EXCLUDED.sentry_rating, players.sentry_rating),
+        poison_rating = COALESCE(EXCLUDED.poison_rating, players.poison_rating),
+        antidote_rating = COALESCE(EXCLUDED.antidote_rating, players.antidote_rating),
+        theft_rating = COALESCE(EXCLUDED.theft_rating, players.theft_rating),
+        vigilance_rating = COALESCE(EXCLUDED.vigilance_rating, players.vigilance_rating),
+        economy = COALESCE(EXCLUDED.economy, players.economy),
+        xp_per_turn = COALESCE(EXCLUDED.xp_per_turn, players.xp_per_turn),
+        turns_available = COALESCE(EXCLUDED.turns_available, players.turns_available),
+        treasury = COALESCE(EXCLUDED.treasury, players.treasury),
+        projected_income = COALESCE(EXCLUDED.projected_income, players.projected_income),
+        updated_at = NOW()
+      RETURNING *`,
+      [
+        id, name, alliance, army, race, rank, tiv,
+        strikeAction, defensiveAction, spyRating, sentryRating,
+        poisonRating, antidoteRating, theftRating, vigilanceRating,
+        economy, xpPerTurn, turnsAvailable, treasury, projectedIncome
+      ]
     );
+
     res.json(rows[0]);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "DB error" });
   }
 });
-
 app.post("/tiv", requireAuth, async (req, res) => {
   try {
     const { playerId, tiv } = req.body;
