@@ -68,8 +68,40 @@ app.get("/", (_req, res) => {
 // --- Player routes ---
 // Upsert player
 app.post("/players", async (req, res) => {
-  const { id, ...fields } = req.body || {};
+  const { id, _source, ...fields } = req.body || {};
   if (!id) return res.status(400).json({ error: "Missing player id" });
+
+  // Whitelists by source
+  const allowed = {
+    bf: ["name","alliance","race","army","rank","treasury"],
+    recon: [
+      "strikeAction","defensiveAction","spyRating","sentryRating",
+      "poisonRating","antidoteRating","theftRating","vigilanceRating",
+      "covertSkill","sentrySkill","siegeTechnology","toxicInfusionLevel",
+      "viperbaneLevel","shadowmeldLevel","sentinelVigilLevel",
+      "economy","technology","experiencePerTurn","soldiersPerTurn",
+      "attackTurns","experience","treasury","projectedIncome","weapons","lastRecon"
+    ],
+    armory: ["tiv","weapons"],
+    base: [
+      "projectedIncome","treasury","economy","xpPerTurn","turnsAvailable",
+      "strikeAction","defensiveAction","spyRating","sentryRating",
+      "poisonRating","antidoteRating","theftRating","vigilanceRating"
+    ],
+    attack: [
+      "tiv","strikeAction","defensiveAction","spyRating","sentryRating",
+      "poisonRating","antidoteRating","theftRating","vigilanceRating","lastTivTime"
+    ]
+  };
+
+  const safe = {};
+  const keys = allowed[_source] || []; // if source unknown, drop fields
+  for (const k of keys) {
+    if (fields[k] !== undefined && fields[k] !== "" && fields[k] !== "Unknown") {
+      safe[k] = fields[k];
+    }
+  }
+
   try {
     // 1. Update latest snapshot in players table
     await pool.query(
@@ -83,15 +115,17 @@ app.post("/players", async (req, res) => {
              rank = COALESCE(EXCLUDED.rank, players.rank),
              tiv = COALESCE(EXCLUDED.tiv, players.tiv),
              updated_at = NOW()`,
-      [id, fields.name || null, fields.alliance || null, fields.race || null,
-       fields.army || null, fields.rank || null, fields.tiv || null]
+      [id, safe.name || null, safe.alliance || null, safe.race || null,
+       safe.army || null, safe.rank || null, safe.tiv || null]
     );
 
-    // 2. Save snapshot history (stringify → jsonb)
-    await pool.query(
-      "INSERT INTO player_snapshots (player_id, data) VALUES ($1, $2::jsonb)",
-      [id, JSON.stringify(fields)]
-    );
+    // 2. Save snapshot history (only safe fields, jsonb)
+    if (Object.keys(safe).length) {
+      await pool.query(
+        "INSERT INTO player_snapshots (player_id, data) VALUES ($1, $2::jsonb)",
+        [id, JSON.stringify({ _source, ...safe })]
+      );
+    }
 
     res.json({ ok: true, id });
   } catch (err) {
@@ -120,6 +154,7 @@ app.get("/players", async (req, res) => {
     const players = result.rows.map(r => {
       const base = toCamelCase(r);
       const snapshot = r.snapshot ? toCamelCase(r.snapshot) : {};
+      delete base.snapshot;
       return { ...base, ...snapshot };
     });
 
@@ -133,9 +168,27 @@ app.get("/players", async (req, res) => {
 // --- Get single player ---
 app.get("/players/:id", async (req, res) => {
   try {
-    const result = await pool.query("SELECT * FROM players WHERE id=$1", [req.params.id]);
+    const result = await pool.query(`
+      SELECT p.*, s.data AS snapshot
+      FROM players p
+      LEFT JOIN LATERAL (
+        SELECT data
+        FROM player_snapshots s
+        WHERE s.player_id = p.id
+        ORDER BY s.time DESC
+        LIMIT 1
+      ) s ON true
+      WHERE p.id = $1
+    `, [req.params.id]);
+
     if (!result.rows.length) return res.status(404).json({ error: "Not found" });
-    res.json(toCamelCase(result.rows[0]));
+
+    const row = result.rows[0];
+    const base = toCamelCase(row);
+    const snapshot = row.snapshot ? toCamelCase(row.snapshot) : {};
+    delete base.snapshot;
+
+    res.json({ ...base, ...snapshot });
   } catch (err) {
     console.error("❌ /players/:id query failed", err);
     res.status(500).json({ error: "DB error" });
@@ -144,30 +197,69 @@ app.get("/players/:id", async (req, res) => {
 
 // --- Get all snapshots for a player ---
 app.get("/snapshots/:id", async (req, res) => {
+  // Same whitelist as in /players
+  const allowed = {
+    bf: ["name","alliance","race","army","rank","treasury"],
+    recon: [
+      "strikeAction","defensiveAction","spyRating","sentryRating",
+      "poisonRating","antidoteRating","theftRating","vigilanceRating",
+      "covertSkill","sentrySkill","siegeTechnology","toxicInfusionLevel",
+      "viperbaneLevel","shadowmeldLevel","sentinelVigilLevel",
+      "economy","technology","experiencePerTurn","soldiersPerTurn",
+      "attackTurns","experience","treasury","projectedIncome","weapons","lastRecon"
+    ],
+    armory: ["tiv","weapons"],
+    base: [
+      "projectedIncome","treasury","economy","xpPerTurn","turnsAvailable",
+      "strikeAction","defensiveAction","spyRating","sentryRating",
+      "poisonRating","antidoteRating","theftRating","vigilanceRating"
+    ],
+    attack: [
+      "tiv","strikeAction","defensiveAction","spyRating","sentryRating",
+      "poisonRating","antidoteRating","theftRating","vigilanceRating","lastTivTime"
+    ]
+  };
+
   try {
     const result = await pool.query(
       "SELECT time, data FROM player_snapshots WHERE player_id = $1 ORDER BY time ASC",
       [req.params.id]
     );
-    res.json({
-      playerId: req.params.id,
-      snapshots: result.rows.map(r => ({
-        ...toCamelCase(r),
-        ...toCamelCase(r.data)
-      }))
+
+    const snapshots = result.rows.map(r => {
+      const snap = toCamelCase(r.data);
+      const src = snap._source || "unknown";
+      const keys = allowed[src] || [];
+      const filtered = {};
+      for (const k of keys) {
+        if (snap[k] !== undefined && snap[k] !== "" && snap[k] !== "Unknown") {
+          filtered[k] = snap[k];
+        }
+      }
+      return {
+        time: r.time,
+        _source: src,
+        ...filtered
+      };
     });
+
+    res.json({ playerId: req.params.id, snapshots });
   } catch (err) {
     console.error("❌ /snapshots query failed", err);
     res.status(500).json({ error: "DB error" });
   }
 });
-
 // --- TIV routes ---
+// Insert new TIV log
 app.post("/tiv", async (req, res) => {
   const { playerId, tiv } = req.body || {};
   if (!playerId || !tiv) return res.status(400).json({ error: "Missing fields" });
+
   try {
-    await pool.query("INSERT INTO tiv_logs (player_id, tiv) VALUES ($1,$2)", [playerId, tiv]);
+    await pool.query(
+      "INSERT INTO tiv_logs (player_id, tiv) VALUES ($1,$2)",
+      [playerId, tiv]
+    );
     res.json({ ok: true });
   } catch (err) {
     console.error("❌ /tiv insert failed", err);
@@ -175,15 +267,43 @@ app.post("/tiv", async (req, res) => {
   }
 });
 
+// Get all TIV logs for one player (ascending order, graph-ready)
 app.get("/tiv/:id", async (req, res) => {
   try {
     const result = await pool.query(
-      "SELECT tiv, time FROM tiv_logs WHERE player_id=$1 ORDER BY time DESC",
+      "SELECT tiv, time FROM tiv_logs WHERE player_id=$1 ORDER BY time ASC",
       [req.params.id]
     );
-    res.json(result.rows.map(toCamelCase));
+
+    const tivLog = result.rows.map(r => ({
+      tiv: Number(r.tiv) || 0,
+      time: new Date(r.time).toISOString()
+    }));
+
+    res.json({ playerId: req.params.id, tivLog });
   } catch (err) {
     console.error("❌ /tiv/:id query failed", err);
+    res.status(500).json({ error: "DB error" });
+  }
+});
+// Get the latest TIV entry for every player
+app.get("/tiv", async (_req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT DISTINCT ON (player_id) player_id, tiv, time
+      FROM tiv_logs
+      ORDER BY player_id, time DESC
+    `);
+
+    const tivs = result.rows.map(r => ({
+      playerId: r.player_id,
+      tiv: Number(r.tiv) || 0,
+      time: new Date(r.time).toISOString()
+    }));
+
+    res.json({ tivs });
+  } catch (err) {
+    console.error("❌ /tiv query failed", err);
     res.status(500).json({ error: "DB error" });
   }
 });
