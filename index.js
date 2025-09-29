@@ -1,165 +1,87 @@
+// index.js
 import express from "express";
 import cors from "cors";
 import pkg from "pg";
+import jwt from "jsonwebtoken";
+
+import authKocRouter from "./routes/authKoc.js";
 
 const { Pool } = pkg;
 const app = express();
 
-// --- Serve static files (optional) ---
-app.use(express.static("public"));
+app.use(cors());
+app.use(express.json());
 
-// --- CORS: KoC + localhost only ---
-const allowedOrigins = new Set([
-  "https://www.kingsofchaos.com",
-  "https://kingsofchaos.com",
-  "http://localhost:3000",
-  "http://127.0.0.1:3000"
-]);
-const corsConfig = {
-  origin(origin, cb) {
-    if (!origin || allowedOrigins.has(origin)) return cb(null, true);
-    cb(new Error("CORS not allowed for origin: " + origin));
-  },
-  methods: ["GET", "POST", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
-  credentials: false,
-  maxAge: 86400
-};
-app.use(cors(corsConfig));
-app.options("*", cors(corsConfig));
-
-// --- Bearer token auth ---
-const TOKEN = process.env.API_TOKEN || "";
-app.use((req, res, next) => {
-  if (!TOKEN) return next();
-  const auth = req.get("Authorization") || "";
-  if (auth === `Bearer ${TOKEN}`) return next();
-  res.status(401).json({ error: "Unauthorized" });
-});
-
-// --- Body parsing ---
-app.use(express.json({ limit: "5mb" }));
-
-// --- Database connection ---
+// --- Database setup ---
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === "production"
-    ? { rejectUnauthorized: false }
-    : false
+  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false,
 });
 
-// --- Health check ---
-app.get("/", (_req, res) => {
-  res.json({ ok: true, service: "koc-roster-api", env: process.env.NODE_ENV || "dev" });
-});
+// Export db for routes like authKoc.js
+export const db = pool;
 
-// --- Player routes ---
-// Upsert player
-app.post("/players", async (req, res) => {
-  const { id, ...fields } = req.body || {};
-  if (!id) return res.status(400).json({ error: "Missing player id" });
+// --- JWT Middleware ---
+function requireAuth(req, res, next) {
+  const auth = req.get("Authorization") || "";
+  const token = auth.startsWith("Bearer ") ? auth.slice(7) : null;
+
+  if (!token) {
+    return res.status(401).json({ error: "No token provided" });
+  }
+
   try {
-    // 1. Update latest snapshot
+    req.user = jwt.verify(token, process.env.JWT_SECRET);
+    next(); // ✅ allow request
+  } catch (err) {
+    console.error("JWT verification failed:", err.message);
+    return res.status(401).json({ error: "Invalid or expired token" });
+  }
+}
+
+// --- Public route: Auth ---
+app.use("/auth/koc", authKocRouter);
+
+// --- Protected routes ---
+app.get("/players", requireAuth, async (req, res) => {
+  try {
+    const { rows } = await pool.query("SELECT * FROM players ORDER BY updated_at DESC");
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "DB error" });
+  }
+});
+
+app.post("/players", requireAuth, async (req, res) => {
+  try {
+    const { id, name, alliance, army, race } = req.body;
+    const { rows } = await pool.query(
+      `INSERT INTO players (id, name, alliance, army, race, updated_at)
+       VALUES ($1, $2, $3, $4, $5, NOW())
+       ON CONFLICT (id) DO UPDATE SET
+         name = EXCLUDED.name,
+         alliance = EXCLUDED.alliance,
+         army = EXCLUDED.army,
+         race = EXCLUDED.race,
+         updated_at = NOW()
+       RETURNING *`,
+      [id, name, alliance, army, race]
+    );
+    res.json(rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "DB error" });
+  }
+});
+
+app.post("/tiv", requireAuth, async (req, res) => {
+  try {
+    const { playerId, tiv } = req.body;
     await pool.query(
-      `INSERT INTO players (id, name, alliance, race, army, rank, tiv, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())
-       ON CONFLICT (id) DO UPDATE
-  SET name = COALESCE(EXCLUDED.name, players.name),
-      alliance = COALESCE(EXCLUDED.alliance, players.alliance),
-      race = COALESCE(EXCLUDED.race, players.race),
-      army = COALESCE(EXCLUDED.army, players.army),
-      rank = COALESCE(EXCLUDED.rank, players.rank),
-      tiv = COALESCE(EXCLUDED.tiv, players.tiv),
-      updated_at = NOW()
-`,
-      [id, fields.name || null, fields.alliance || null, fields.race || null,
-       fields.army || null, fields.rank || null, fields.tiv || null]
+      "INSERT INTO tiv_log (player_id, tiv, time) VALUES ($1, $2, NOW())",
+      [playerId, tiv]
     );
-
-    // 2. Save snapshot history
-    await pool.query(
-      "INSERT INTO player_snapshots (player_id, data) VALUES ($1, $2)",
-      [id, fields]
-    );
-
-    res.json({ ok: true, id });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "DB error" });
-  }
-});
-
-// --- Get all players (latest data merged with snapshot) ---
-app.get("/players", async (req, res) => {
-  try {
-    const result = await pool.query(`
-      SELECT p.id, p.name, p.alliance, p.race, p.army, p.rank, p.tiv, p.updated_at,
-             s.data AS snapshot
-      FROM players p
-      LEFT JOIN LATERAL (
-        SELECT data
-        FROM player_snapshots s
-        WHERE s.player_id = p.id
-        ORDER BY s.time DESC
-        LIMIT 1
-      ) s ON true
-      ORDER BY p.updated_at DESC
-    `);
-
-    // Merge snapshot JSON into flat player object
-    const players = result.rows.map(r => ({
-      id: r.id,
-      name: r.name,
-      alliance: r.alliance,
-      race: r.race,
-      army: r.army,
-      rank: r.rank,
-      tiv: r.tiv,
-      updated_at: r.updated_at,
-      ...(r.snapshot || {}) // unpack recon/base/armory fields
-    }));
-
-    res.json(players);
-  } catch (err) {
-    console.error("❌ /players query failed", err);
-    res.status(500).json({ error: "DB error" });
-  }
-});
-
-// Get single player
-app.get("/players/:id", async (req, res) => {
-  try {
-    const result = await pool.query("SELECT * FROM players WHERE id=$1", [req.params.id]);
-    if (!result.rows.length) return res.status(404).json({ error: "Not found" });
-    res.json(result.rows[0]);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "DB error" });
-  }
-});
-
-// --- Get all snapshots for a player ---
-app.get("/snapshots/:id", async (req, res) => {
-  const { id } = req.params;
-  try {
-    const result = await pool.query(
-      "SELECT time, data FROM player_snapshots WHERE player_id = $1 ORDER BY time ASC",
-      [id]
-    );
-    res.json({ player_id: id, snapshots: result.rows });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "DB error" });
-  }
-});
-
-// --- TIV routes ---
-// Add TIV log
-app.post("/tiv", async (req, res) => {
-  const { playerId, tiv } = req.body || {};
-  if (!playerId || !tiv) return res.status(400).json({ error: "Missing fields" });
-  try {
-    await pool.query("INSERT INTO tiv_logs (player_id, tiv) VALUES ($1,$2)", [playerId, tiv]);
     res.json({ ok: true });
   } catch (err) {
     console.error(err);
@@ -167,32 +89,21 @@ app.post("/tiv", async (req, res) => {
   }
 });
 
-// Get TIV history for player
-app.get("/tiv/:id", async (req, res) => {
-  try {
-    const result = await pool.query(
-      "SELECT tiv, time FROM tiv_logs WHERE player_id=$1 ORDER BY time DESC",
-      [req.params.id]
-    );
-    res.json(result.rows);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "DB error" });
-  }
-});
-
-// --- Plain Roster Page ---
-app.get("/roster", async (req, res) => {
+// --- Plain roster page (for quick debug) ---
+app.get("/roster", requireAuth, async (req, res) => {
   try {
     const result = await pool.query("SELECT * FROM players ORDER BY updated_at DESC");
 
-    const rows = result.rows.map(p => `
-      <tr>
-        ${Object.values(p).map(val => `<td>${val ?? ""}</td>`).join("")}
-      </tr>
-    `).join("");
+    const rows = result.rows.map(
+      (p) =>
+        `<tr>${Object.values(p)
+          .map((val) => `<td>${val ?? ""}</td>`)
+          .join("")}</tr>`
+    );
 
-    const headers = Object.keys(result.rows[0] || {}).map(h => `<th>${h}</th>`).join("");
+    const headers = Object.keys(result.rows[0] || {})
+      .map((h) => `<th>${h}</th>`)
+      .join("");
 
     const html = `
       <!DOCTYPE html>
@@ -211,11 +122,12 @@ app.get("/roster", async (req, res) => {
         <h1>KoC Roster (Raw)</h1>
         <table>
           <tr>${headers}</tr>
-          ${rows}
+          ${rows.join("")}
         </table>
       </body>
       </html>
     `;
+
     res.send(html);
   } catch (err) {
     console.error(err);
@@ -226,6 +138,5 @@ app.get("/roster", async (req, res) => {
 // --- Start server ---
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log("API running on port", PORT);
+  console.log("✅ API running on port", PORT);
 });
-
