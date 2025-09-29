@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         KoC Data Centre
 // @namespace    trevo88423
-// @version      1.5.3
+// @version      1.5.4
 // @description  Unified script: Tracks TIV + recon stats (Battlefield, Attack, Armory, Recon, Base).
 //               Syncs player + TIV data to API. Provides roster dashboards with multi-tab views:
 //               Roster, Top TIV, All Stats. Adds XP → Attack Turn trading calculator (Sidebar, Popup, Attack Log, Recon).
@@ -32,29 +32,75 @@
 
   const TIV_KEY = "KoC_DataCentre"; // attack/armory TIV logs
   const MAP_KEY = "KoC_NameMap";    // latest player snapshot by id
-  const API_URL = "https://koc-roster-api-production.up.railway.app";
-  const API_TOKEN = "tiv_4P7Z-pnPz2zvJ8rGgU5x";
+ const API_URL = "https://koc-roster-api-production.up.railway.app";
 
- function sendToAPI(endpoint, data) {
+// === Auth Token Helper ===
+async function getAuthToken() {
+  let token = localStorage.getItem("KoC_AuthToken");
+  let tokenExp = parseInt(localStorage.getItem("KoC_AuthTokenExp") || "0", 10);
+
+  // reuse token if still valid
+  if (token && Date.now() < tokenExp) {
+    return token;
+  }
+
+  // otherwise login again
+  const id = localStorage.getItem("KoC_MyId");
+  const name = localStorage.getItem("KoC_MyName");
+  if (!id || !name) {
+    console.error("❌ Cannot login: missing KoC id/name");
+    return null;
+  }
+
+  try {
+    const resp = await fetch(`${API_URL}/auth/koc`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, name })
+    });
+    if (!resp.ok) throw new Error("Auth failed " + resp.status);
+    const data = await resp.json();
+
+    token = data.accessToken;
+    const exp = Date.now() + 12 * 60 * 60 * 1000; // 12h
+    localStorage.setItem("KoC_AuthToken", token);
+    localStorage.setItem("KoC_AuthTokenExp", String(exp));
+
+    console.log("🔑 Got new auth token");
+    return token;
+  } catch (err) {
+    console.error("❌ Auth error:", err);
+    return null;
+  }
+}
+
+// === API sender ===
+async function sendToAPI(endpoint, data) {
+  const token = await getAuthToken();
+  if (!token) {
+    console.warn("⚠️ Skipping API send, no token");
+    return;
+  }
+
   console.log(`🌐 Preparing API call → ${endpoint}`, data);
 
   fetch(`${API_URL}/${endpoint}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "Authorization": "Bearer " + API_TOKEN
+      "Authorization": "Bearer " + token
     },
     body: JSON.stringify(data)
   })
-  .then(async r => {
-    let json;
-    try { json = await r.json(); } catch { json = { error: "Invalid JSON response" }; }
-    console.log(`🌐 API response from ${endpoint}:`, json);
-    return json;
-  })
-  .catch(err => {
-    console.error(`❌ API call failed → ${endpoint}`, err);
-  });
+    .then(async r => {
+      let json;
+      try { json = await r.json(); } catch { json = { error: "Invalid JSON" }; }
+      console.log(`🌐 API response from ${endpoint}:`, json);
+      return json;
+    })
+    .catch(err => {
+      console.error(`❌ API call failed → ${endpoint}`, err);
+    });
 }
 
 
@@ -924,12 +970,15 @@ if (location.pathname.includes("datacentre")) {
 // === Data Access (API + local fallback) ===
 // ======================================
 const API_URL = "https://koc-roster-api-production.up.railway.app";
-const API_TOKEN = "tiv_4P7Z-pnPz2zvJ8rGgU5x";
+
+// Reuse getAuthToken() helper from above
 
 async function loadPlayers() {
   try {
+    const token = await getAuthToken();
+    if (!token) throw new Error("No token");
     const resp = await fetch(`${API_URL}/players`, {
-      headers: { "Authorization": "Bearer " + API_TOKEN }
+      headers: { "Authorization": "Bearer " + token }
     });
     if (!resp.ok) throw new Error("API error " + resp.status);
     const players = await resp.json();
@@ -952,8 +1001,6 @@ async function initRosterData() {
 const tivLog  = JSON.parse(localStorage.getItem("KoC_DataCentre") || "[]");
 const lastTiv = {};
 tivLog.forEach(r => { lastTiv[r.id] = r; });
-
-
 
   // ==========================
   // === Utility Functions  ===
