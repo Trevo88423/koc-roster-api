@@ -42,11 +42,22 @@ function requireAuth(req, res, next) {
 // --- Public route: Auth ---
 app.use("/auth/koc", authKocRouter);
 
+// --- Helper: convert snake_case to camelCase ---
+function camelize(row) {
+  const out = {};
+  for (const [k, v] of Object.entries(row)) {
+    const camelKey = k.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+    out[camelKey] = v;
+  }
+  return out;
+}
+
 // --- Protected routes ---
 app.get("/players", requireAuth, async (req, res) => {
   try {
     const { rows } = await pool.query("SELECT * FROM players ORDER BY updated_at DESC");
-    res.json(rows);
+    // Convert each row into camelCase keys
+    res.json(rows.map(camelize));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "DB error" });
@@ -128,7 +139,8 @@ app.post("/players", requireAuth, async (req, res) => {
       ]
     );
 
-    res.json(rows[0]);
+    // Return row in camelCase
+    res.json(camelize(rows[0]));
   } catch (err) {
     console.error("❌ /players DB error:", err);
     res.status(500).json({ error: "DB error" });
