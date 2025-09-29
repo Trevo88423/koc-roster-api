@@ -1,8 +1,7 @@
 // routes/authKoc.js
 import { Router } from "express";
 import jwt from "jsonwebtoken";
-import { db } from "../db.js";   // adjust path to your pg client
-
+import { db } from "../index.js";   // import db export from index.js
 const r = Router();
 
 // POST /auth/koc
