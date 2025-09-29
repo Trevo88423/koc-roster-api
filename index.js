@@ -53,6 +53,22 @@ app.get("/players", requireAuth, async (req, res) => {
   }
 });
 
+// --- Helper: clean numbers into BIGINT/null ---
+function toBigInt(val) {
+  if (val === null || val === undefined) return null;
+  if (typeof val === "string") {
+    const clean = val.replace(/,/g, "").replace(/[^\d]/g, ""); // strip commas & non-digits
+    if (clean === "" || val === "???") return null;
+    return BigInt(clean);
+  }
+  if (typeof val === "number") return BigInt(val);
+  try {
+    return BigInt(val);
+  } catch {
+    return null;
+  }
+}
+
 // --- Upsert player with full stats, skipping blanks ---
 app.post("/players", requireAuth, async (req, res) => {
   try {
@@ -101,19 +117,24 @@ app.post("/players", requireAuth, async (req, res) => {
         updated_at = NOW()
       RETURNING *`,
       [
-        id, name, alliance, army, race, rank, tiv,
-        strikeAction, defensiveAction, spyRating, sentryRating,
-        poisonRating, antidoteRating, theftRating, vigilanceRating,
-        economy, xpPerTurn, turnsAvailable, treasury, projectedIncome
+        id, name, alliance, army, race, rank, toBigInt(tiv),
+        toBigInt(strikeAction), toBigInt(defensiveAction),
+        toBigInt(spyRating), toBigInt(sentryRating),
+        toBigInt(poisonRating), toBigInt(antidoteRating),
+        toBigInt(theftRating), toBigInt(vigilanceRating),
+        toBigInt(economy), toBigInt(xpPerTurn),
+        toBigInt(turnsAvailable), toBigInt(treasury),
+        toBigInt(projectedIncome)
       ]
     );
 
     res.json(rows[0]);
   } catch (err) {
-    console.error(err);
+    console.error("❌ /players DB error:", err);
     res.status(500).json({ error: "DB error" });
   }
 });
+
 app.post("/tiv", requireAuth, async (req, res) => {
   try {
     const { playerId, tiv } = req.body;
