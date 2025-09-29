@@ -134,67 +134,79 @@ app.post("/players", async (req, res) => {
   }
 });
 
-// --- Get all players ---
+// --- Get all players (merged) ---
 app.get("/players", async (req, res) => {
   try {
-    const result = await pool.query(`
-      SELECT p.id, p.name, p.alliance, p.race, p.army, p.rank, p.tiv, p.updated_at,
-             s.data AS snapshot
-      FROM players p
-      LEFT JOIN LATERAL (
-        SELECT data
-        FROM player_snapshots s
-        WHERE s.player_id = p.id
-        ORDER BY s.time DESC
-        LIMIT 1
-      ) s ON true
-      ORDER BY p.updated_at DESC
-    `);
+    // Pull base player info
+    const baseResult = await pool.query("SELECT * FROM players ORDER BY updated_at DESC");
+    const players = [];
 
-    const players = result.rows.map(r => {
-      const base = toCamelCase(r);
-      const snapshot = r.snapshot ? toCamelCase(r.snapshot) : {};
-      delete base.snapshot;
-      return { ...base, ...snapshot };
-    });
+    for (const p of baseResult.rows) {
+      // Grab all snapshots for this player
+      const snapResult = await pool.query(
+        "SELECT time, data FROM player_snapshots WHERE player_id=$1 ORDER BY time ASC",
+        [p.id]
+      );
+
+      let merged = {};
+      snapResult.rows.forEach(r => {
+        const data = r.data;
+        for (const [k, v] of Object.entries(data)) {
+          if (v && v !== "Unknown" && v !== "") {
+            // Always overwrite with newer values
+            merged[k] = v;
+            merged[k + "Time"] = r.time; // keep timestamp for italics/stale logic
+          }
+        }
+      });
+
+      players.push({
+        ...toCamelCase(p),  // id, name, alliance, rank, tiv, etc.
+        ...toCamelCase(merged)
+      });
+    }
 
     res.json(players);
   } catch (err) {
-    console.error("❌ /players query failed", err);
+    console.error("❌ /players merge query failed", err);
     res.status(500).json({ error: "DB error" });
   }
 });
-
-// --- Get single player ---
+// --- Get single player (merged) ---
 app.get("/players/:id", async (req, res) => {
   try {
-    const result = await pool.query(`
-      SELECT p.*, s.data AS snapshot
-      FROM players p
-      LEFT JOIN LATERAL (
-        SELECT data
-        FROM player_snapshots s
-        WHERE s.player_id = p.id
-        ORDER BY s.time DESC
-        LIMIT 1
-      ) s ON true
-      WHERE p.id = $1
-    `, [req.params.id]);
+    // Grab base player row
+    const baseResult = await pool.query("SELECT * FROM players WHERE id=$1", [req.params.id]);
+    if (!baseResult.rows.length) return res.status(404).json({ error: "Not found" });
 
-    if (!result.rows.length) return res.status(404).json({ error: "Not found" });
+    const base = baseResult.rows[0];
 
-    const row = result.rows[0];
-    const base = toCamelCase(row);
-    const snapshot = row.snapshot ? toCamelCase(row.snapshot) : {};
-    delete base.snapshot;
+    // Grab all snapshots
+    const snapResult = await pool.query(
+      "SELECT time, data FROM player_snapshots WHERE player_id=$1 ORDER BY time ASC",
+      [req.params.id]
+    );
 
-    res.json({ ...base, ...snapshot });
+    let merged = {};
+    snapResult.rows.forEach(r => {
+      const data = r.data;
+      for (const [k, v] of Object.entries(data)) {
+        if (v && v !== "Unknown" && v !== "") {
+          merged[k] = v;
+          merged[k + "Time"] = r.time; // preserve timestamp for stale logic
+        }
+      }
+    });
+
+    res.json({
+      ...toCamelCase(base),
+      ...toCamelCase(merged)
+    });
   } catch (err) {
-    console.error("❌ /players/:id query failed", err);
+    console.error("❌ /players/:id merge query failed", err);
     res.status(500).json({ error: "DB error" });
   }
 });
-
 // --- Get all snapshots for a player ---
 app.get("/snapshots/:id", async (req, res) => {
   // Same whitelist as in /players
