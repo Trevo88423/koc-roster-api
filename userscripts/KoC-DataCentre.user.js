@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         KoC Data Centre
 // @namespace    trevo88423
-// @version      1.5.4
+// @version      1.5.5
 // @description  Unified script: Tracks TIV + recon stats (Battlefield, Attack, Armory, Recon, Base).
 //               Syncs player + TIV data to API. Provides roster dashboards with multi-tab views:
 //               Roster, Top TIV, All Stats. Adds XP → Attack Turn trading calculator (Sidebar, Popup, Attack Log, Recon).
@@ -1140,7 +1140,7 @@ function renderTable(containerId, columns, rows, defaultSortKey = null, defaultS
         antidote: fmt(info.antidoteRating ?? tivRec.antidoteRating, info.antidoteRatingTime || tivRec.time),
         theft: fmt(info.theftRating ?? tivRec.theftRating, info.theftRatingTime || tivRec.time),
         vigilance: fmt(info.vigilanceRating ?? tivRec.vigilanceRating, info.vigilanceRatingTime || tivRec.time),
-        lastSeen: timeAgo(info.lastSeen || tivRec.time)
+        lastSeen: timeAgo(info.updatedAt)
       };
     });
 
@@ -1158,7 +1158,7 @@ function renderTable(containerId, columns, rows, defaultSortKey = null, defaultS
       return {
         name: `<a href="https://www.kingsofchaos.com/attack.php?id=${id}" target="_blank">${info.name || "Unknown"}</a>`,
         tiv: tivNum.toLocaleString(),
-        updated: timeAgo(info.lastSeen || tivRec?.time)
+        updated: timeAgo(info.updatedAt)
       };
     });
   rows.sort((a, b) => toNum(b.tiv) - toNum(a.tiv));
@@ -1172,8 +1172,8 @@ function prepareAllStatsRows(limit = 10) {
     .filter(info => !!info.strikeAction) // only players we’ve got recon/armory stats for
     .map(info => {
       const id = info.id;
-      const tivRec = lastTiv[id];
-      const tivNum = (typeof info.tiv === "number" ? info.tiv : (tivRec?.tiv || 0));
+      const tivNum = (typeof info.tiv === "number" ? info.tiv : 0);
+
       return {
         name: `<a href="https://www.kingsofchaos.com/attack.php?id=${id}" target="_blank">${info.name || "Unknown"}</a>`,
         tiv: tivNum.toLocaleString(),
@@ -1185,7 +1185,8 @@ function prepareAllStatsRows(limit = 10) {
         antidote: info.antidoteRating || "—",
         theft: info.theftRating || "—",
         vigilance: info.vigilanceRating || "—",
-        lastRecon: timeAgo(getLatestReconTime(info))
+        // ✅ Use API's updatedAt for consistency across all clients
+        lastRecon: timeAgo(info.updatedAt || getLatestReconTime(info))
       };
     });
 
@@ -1193,7 +1194,6 @@ function prepareAllStatsRows(limit = 10) {
   if (limit > 0) rows = rows.slice(0, limit);
   return rows;
 }
-
 
   // ============================
   // === Render Each Tab View ===
