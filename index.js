@@ -123,12 +123,12 @@ app.post("/players", requireAuth, async (req, res) => {
         NOW()
       )
       ON CONFLICT (id) DO UPDATE SET
-        name = COALESCE(EXCLUDED.name, players.name),
-        alliance = COALESCE(EXCLUDED.alliance, players.alliance),
-        army = COALESCE(EXCLUDED.army, players.army),
-        race = COALESCE(EXCLUDED.race, players.race),
-        rank = COALESCE(EXCLUDED.rank, players.rank),
-        tiv = COALESCE(EXCLUDED.tiv, players.tiv),
+        name = COALESCE(NULLIF(NULLIF(EXCLUDED.name, ''), '???'), players.name),
+alliance = COALESCE(NULLIF(NULLIF(EXCLUDED.alliance, ''), '???'), players.alliance),
+army = COALESCE(NULLIF(NULLIF(EXCLUDED.army, ''), '???'), players.army),
+race = COALESCE(NULLIF(NULLIF(EXCLUDED.race, ''), '???'), players.race),
+rank = COALESCE(NULLIF(NULLIF(EXCLUDED.rank, ''), '???'), players.rank),
+
         strike_action = COALESCE(EXCLUDED.strike_action, players.strike_action),
         defensive_action = COALESCE(EXCLUDED.defensive_action, players.defensive_action),
         spy_rating = COALESCE(EXCLUDED.spy_rating, players.spy_rating),
