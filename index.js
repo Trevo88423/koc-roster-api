@@ -11,8 +11,8 @@ const app = express();
 
 // --- CORS setup ---
 const allowedOrigins = [
-  "https://www.kingsofchaos.com",  // KoC site
-  "http://localhost:3000"          // optional: local testing
+  "https://www.kingsofchaos.com",
+  "http://localhost:3000"
 ];
 
 app.use(cors({
@@ -24,6 +24,9 @@ app.use(cors({
     }
   }
 }));
+
+// ✅ Respond to preflight OPTIONS requests
+app.options("*", cors());
 
 app.use(express.json());
 
