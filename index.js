@@ -52,12 +52,29 @@ function camelize(row) {
   return out;
 }
 
+// --- Helper: also coerce bigint/text stats into real numbers ---
+function normalizeRow(row) {
+  const c = camelize(row);
+  const numFields = [
+    "tiv","strikeAction","defensiveAction","spyRating","sentryRating",
+    "poisonRating","antidoteRating","theftRating","vigilanceRating",
+    "economy","xpPerTurn","turnsAvailable","treasury","projectedIncome"
+  ];
+  numFields.forEach(f => {
+    if (c[f] !== null && c[f] !== undefined) {
+      const n = Number(c[f]);
+      c[f] = isNaN(n) ? null : n;
+    }
+  });
+  return c;
+}
+
 // --- Protected routes ---
 app.get("/players", requireAuth, async (req, res) => {
   try {
     const { rows } = await pool.query("SELECT * FROM players ORDER BY updated_at DESC");
     // Convert each row into camelCase keys
-    res.json(rows.map(camelize));
+    res.json(rows.map(normalizeRow));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "DB error" });
@@ -139,8 +156,9 @@ app.post("/players", requireAuth, async (req, res) => {
       ]
     );
 
-    // Return row in camelCase
-    res.json(camelize(rows[0]));
+    // Return row in camelCase + normalized numbers
+res.json(normalizeRow(rows[0]));
+
   } catch (err) {
     console.error("❌ /players DB error:", err);
     res.status(500).json({ error: "DB error" });
