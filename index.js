@@ -170,17 +170,24 @@ VALUES (
     updated_at = NOW()
 
       RETURNING *`,
-      [
-        id, name, alliance, army, race, rank, toBigInt(tiv),
-        toBigInt(strikeAction), toBigInt(defensiveAction),
-        toBigInt(spyRating), toBigInt(sentryRating),
-        toBigInt(poisonRating), toBigInt(antidoteRating),
-        toBigInt(theftRating), toBigInt(vigilanceRating),
-        toBigInt(economy), toBigInt(xpPerTurn),
-        toBigInt(turnsAvailable), toBigInt(treasury),
-        toBigInt(projectedIncome)
-      ]
-    );
+[
+  id, name, alliance, army, race, rank, toBigInt(tiv),
+
+  toBigInt(strikeAction), strikeActionTime,
+  toBigInt(defensiveAction), defensiveActionTime,
+  toBigInt(spyRating), spyRatingTime,
+  toBigInt(sentryRating), sentryRatingTime,
+  toBigInt(poisonRating), poisonRatingTime,
+  toBigInt(antidoteRating), antidoteRatingTime,
+  toBigInt(theftRating), theftRatingTime,
+  toBigInt(vigilanceRating), vigilanceRatingTime,
+
+  toBigInt(economy), toBigInt(xpPerTurn),
+  toBigInt(turnsAvailable), toBigInt(treasury),
+  toBigInt(projectedIncome)
+]
+);
+
 
     // Return row in camelCase + normalized numbers
 res.json(normalizeRow(rows[0]));
