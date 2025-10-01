@@ -11,22 +11,27 @@ const app = express();
 
 // --- CORS setup ---
 const allowedOrigins = [
-  "https://www.kingsofchaos.com",
-  "http://localhost:3000"
+  "https://www.kingsofchaos.com",  // KoC site
+  "http://localhost:3000"          // local testing
 ];
 
-app.use(cors({
+const corsOptions = {
   origin: function (origin, callback) {
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
       callback(new Error("Not allowed by CORS: " + origin));
     }
-  }
-}));
+  },
+  methods: ["GET", "POST", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"]
+};
 
-// ✅ Respond to preflight OPTIONS requests
-app.options("*", cors());
+app.use(cors(corsOptions));
+
+// ✅ Ensure preflight OPTIONS requests use the same config
+app.options("*", cors(corsOptions));
+
 
 app.use(express.json());
 
