@@ -8,7 +8,6 @@ import authKocRouter from "./routes/authKoc.js";
 
 const { Pool } = pkg;
 const app = express();
-
 // --- CORS setup ---
 const allowedOrigins = [
   "https://www.kingsofchaos.com",  // KoC site
@@ -17,19 +16,22 @@ const allowedOrigins = [
 
 const corsOptions = {
   origin: function (origin, callback) {
+    // allow requests with no origin (like curl/postman) or whitelisted origins
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
+      console.warn("❌ Blocked by CORS:", origin);
       callback(new Error("Not allowed by CORS: " + origin));
     }
   },
   methods: ["GET", "POST", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"]
+  allowedHeaders: ["Content-Type", "Authorization"],
+  credentials: true, // optional, lets cookies/headers through
 };
 
 app.use(cors(corsOptions));
 
-// ✅ Ensure preflight OPTIONS requests use the same config
+// ✅ Handle preflight OPTIONS requests with same CORS config
 app.options("*", cors(corsOptions));
 
 
