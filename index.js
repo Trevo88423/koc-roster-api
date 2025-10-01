@@ -108,41 +108,67 @@ app.post("/players", requireAuth, async (req, res) => {
     } = req.body;
 
     const { rows } = await pool.query(`
-      INSERT INTO players (
-        id, name, alliance, army, race, rank, tiv,
-        strike_action, defensive_action, spy_rating, sentry_rating,
-        poison_rating, antidote_rating, theft_rating, vigilance_rating,
-        economy, xp_per_turn, turns_available, treasury, projected_income,
-        updated_at
-      )
-      VALUES (
-        $1,$2,$3,$4,$5,$6,$7,
-        $8,$9,$10,$11,
-        $12,$13,$14,$15,
-        $16,$17,$18,$19,$20,
-        NOW()
-      )
-      ON CONFLICT (id) DO UPDATE SET
-        name = COALESCE(NULLIF(NULLIF(EXCLUDED.name, ''), '???'), players.name),
-alliance = COALESCE(NULLIF(NULLIF(EXCLUDED.alliance, ''), '???'), players.alliance),
-army = COALESCE(NULLIF(NULLIF(EXCLUDED.army, ''), '???'), players.army),
-race = COALESCE(NULLIF(NULLIF(EXCLUDED.race, ''), '???'), players.race),
-rank = COALESCE(NULLIF(NULLIF(EXCLUDED.rank, ''), '???'), players.rank),
+     INSERT INTO players (
+  id, name, alliance, army, race, rank, tiv,
+  strike_action, strike_action_time,
+  defensive_action, defensive_action_time,
+  spy_rating, spy_rating_time,
+  sentry_rating, sentry_rating_time,
+  poison_rating, poison_rating_time,
+  antidote_rating, antidote_rating_time,
+  theft_rating, theft_rating_time,
+  vigilance_rating, vigilance_rating_time,
+  economy, xp_per_turn, turns_available, treasury, projected_income,
+  updated_at
+)
+VALUES (
+  $1,$2,$3,$4,$5,$6,$7,
+  $8,$9, $10,$11,
+  $12,$13, $14,$15,
+  $16,$17, $18,$19,
+  $20,$21, $22,$23,
+  $24,$25,$26,$27,$28,
+  NOW()
+)
 
-        strike_action = COALESCE(EXCLUDED.strike_action, players.strike_action),
-        defensive_action = COALESCE(EXCLUDED.defensive_action, players.defensive_action),
-        spy_rating = COALESCE(EXCLUDED.spy_rating, players.spy_rating),
-        sentry_rating = COALESCE(EXCLUDED.sentry_rating, players.sentry_rating),
-        poison_rating = COALESCE(EXCLUDED.poison_rating, players.poison_rating),
-        antidote_rating = COALESCE(EXCLUDED.antidote_rating, players.antidote_rating),
-        theft_rating = COALESCE(EXCLUDED.theft_rating, players.theft_rating),
-        vigilance_rating = COALESCE(EXCLUDED.vigilance_rating, players.vigilance_rating),
-        economy = COALESCE(EXCLUDED.economy, players.economy),
-        xp_per_turn = COALESCE(EXCLUDED.xp_per_turn, players.xp_per_turn),
-        turns_available = COALESCE(EXCLUDED.turns_available, players.turns_available),
-        treasury = COALESCE(EXCLUDED.treasury, players.treasury),
-        projected_income = COALESCE(EXCLUDED.projected_income, players.projected_income),
-        updated_at = NOW()
+      ON CONFLICT (id) DO UPDATE SET
+    name     = COALESCE(NULLIF(NULLIF(EXCLUDED.name, ''), '???'), players.name),
+    alliance = COALESCE(NULLIF(NULLIF(EXCLUDED.alliance, ''), '???'), players.alliance),
+    army     = COALESCE(NULLIF(NULLIF(EXCLUDED.army, ''), '???'), players.army),
+    race     = COALESCE(NULLIF(NULLIF(EXCLUDED.race, ''), '???'), players.race),
+    rank     = COALESCE(NULLIF(NULLIF(EXCLUDED.rank, ''), '???'), players.rank),
+
+    strike_action      = COALESCE(EXCLUDED.strike_action, players.strike_action),
+    strike_action_time = COALESCE(EXCLUDED.strike_action_time, players.strike_action_time),
+
+    defensive_action      = COALESCE(EXCLUDED.defensive_action, players.defensive_action),
+    defensive_action_time = COALESCE(EXCLUDED.defensive_action_time, players.defensive_action_time),
+
+    spy_rating      = COALESCE(EXCLUDED.spy_rating, players.spy_rating),
+    spy_rating_time = COALESCE(EXCLUDED.spy_rating_time, players.spy_rating_time),
+
+    sentry_rating      = COALESCE(EXCLUDED.sentry_rating, players.sentry_rating),
+    sentry_rating_time = COALESCE(EXCLUDED.sentry_rating_time, players.sentry_rating_time),
+
+    poison_rating      = COALESCE(EXCLUDED.poison_rating, players.poison_rating),
+    poison_rating_time = COALESCE(EXCLUDED.poison_rating_time, players.poison_rating_time),
+
+    antidote_rating      = COALESCE(EXCLUDED.antidote_rating, players.antidote_rating),
+    antidote_rating_time = COALESCE(EXCLUDED.antidote_rating_time, players.antidote_rating_time),
+
+    theft_rating      = COALESCE(EXCLUDED.theft_rating, players.theft_rating),
+    theft_rating_time = COALESCE(EXCLUDED.theft_rating_time, players.theft_rating_time),
+
+    vigilance_rating      = COALESCE(EXCLUDED.vigilance_rating, players.vigilance_rating),
+    vigilance_rating_time = COALESCE(EXCLUDED.vigilance_rating_time, players.vigilance_rating_time),
+
+    economy         = COALESCE(EXCLUDED.economy, players.economy),
+    xp_per_turn     = COALESCE(EXCLUDED.xp_per_turn, players.xp_per_turn),
+    turns_available = COALESCE(EXCLUDED.turns_available, players.turns_available),
+    treasury        = COALESCE(EXCLUDED.treasury, players.treasury),
+    projected_income = COALESCE(EXCLUDED.projected_income, players.projected_income),
+    updated_at = NOW()
+
       RETURNING *`,
       [
         id, name, alliance, army, race, rank, toBigInt(tiv),
