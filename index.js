@@ -9,8 +9,24 @@ import authKocRouter from "./routes/authKoc.js";
 const { Pool } = pkg;
 const app = express();
 
-app.use(cors());
+// --- CORS setup ---
+const allowedOrigins = [
+  "https://www.kingsofchaos.com",  // KoC site
+  "http://localhost:3000"          // optional: local testing
+];
+
+app.use(cors({
+  origin: function (origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error("Not allowed by CORS: " + origin));
+    }
+  }
+}));
+
 app.use(express.json());
+
 
 // --- Database setup ---
 const pool = new Pool({
