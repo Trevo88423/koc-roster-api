@@ -1,10 +1,8 @@
 // ==UserScript==
 // @name         KoC Data Centre
 // @namespace    trevo88423
-// @version      1.5.5
-// @description  Unified script: Tracks TIV + recon stats (Battlefield, Attack, Armory, Recon, Base).
-//               Syncs player + TIV data to API. Provides roster dashboards with multi-tab views:
-//               Roster, Top TIV, All Stats. Adds XP → Attack Turn trading calculator (Sidebar, Popup, Attack Log, Recon).
+// @version      1.5.6
+// @description  Tracks TIV + recon stats, syncs to API, provides dashboards & XP→Turn tools.
 // @author       Trevor & ChatGPT
 // @match        https://www.kingsofchaos.com/*
 // @icon         https://www.kingsofchaos.com/favicon.ico
@@ -13,160 +11,204 @@
 // @downloadURL  https://raw.githubusercontent.com/Trevo88423/koc-roster-api/main/userscripts/KoC-DataCentre.user.js
 // ==/UserScript==
 
-
 (function() {
   'use strict';
 
-  // Grab version from @version in the header (via Tampermonkey GM_info)
   const ver = (typeof GM_info !== "undefined" && GM_info.script && GM_info.script.version)
-              ? GM_info.script.version
-              : "dev";
-
+              ? GM_info.script.version : "dev";
   console.log(`✅ DataCentre+XPTool v${ver} loaded on`, location.pathname);
 
+  const API_URL  = "https://koc-roster-api-production.up.railway.app";
+  const TOKEN_KEY = "KoC_SRAUTH"; // unified storage
+  const TIV_KEY  = "KoC_DataCentre"; // local TIV logs
+  const MAP_KEY  = "KoC_NameMap";    // cached player snapshots
 
+  // ========================
+  // === Auth Management  ===
+  // ========================
+
+  function getStoredAuth() {
+    try { return JSON.parse(localStorage.getItem(TOKEN_KEY) || "null"); }
+    catch { return null; }
+  }
+
+  function saveAuth(token, id, name) {
+    localStorage.setItem(TOKEN_KEY, JSON.stringify({
+      token, id, name,
+      expiry: Date.now() + 12 * 60 * 60 * 1000 // 12h
+    }));
+  }
+
+  async function getValidToken() {
+    const auth = getStoredAuth();
+    if (!auth) return null;
+
+    if (Date.now() < auth.expiry) {
+      return auth.token; // ✅ still valid
+    }
+
+    // 🔄 refresh silently
+    try {
+      const resp = await fetch(`${API_URL}/auth/koc`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: auth.id, name: auth.name })
+      });
+      if (!resp.ok) throw new Error("Refresh failed " + resp.status);
+      const data = await resp.json();
+      saveAuth(data.token || data.accessToken, auth.id, auth.name);
+      console.log("🔄 Token refreshed automatically");
+      return data.token || data.accessToken;
+    } catch (err) {
+      console.warn("⚠️ Auto refresh failed:", err);
+      localStorage.removeItem(TOKEN_KEY);
+      return null;
+    }
+  }
+
+  async function loginSR() {
+    try {
+      const link = document.querySelector('a[href*="stats.php?id="]');
+      if (!link) throw new Error("Go to your own Stats page first");
+      const id = link.href.match(/id=(\d+)/)[1];
+      const name = link.textContent.trim();
+
+      const resp = await fetch(`${API_URL}/auth/koc`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, name })
+      });
+      if (!resp.ok) throw new Error("Auth failed " + resp.status);
+      const data = await resp.json();
+
+      saveAuth(data.token || data.accessToken, id, name);
+      alert("✅ SR Login successful! Refreshing…");
+      location.reload();
+    } catch (err) {
+      console.error("Login failed", err);
+      alert("❌ Login failed: " + err.message);
+    }
+  }
+
+  function logoutSR() {
+    localStorage.removeItem(TOKEN_KEY);
+    alert("Logged out.");
+    location.reload();
+  }
+
+  // Gatekeeper
+  (async () => {
+    const token = await getValidToken();
+    if (!token) {
+      if (location.pathname.includes("base.php")) {
+        const box = document.createElement("div");
+        box.style = "padding:12px;background:#111;color:#fff;border:1px solid #555;margin:12px;font-family:Arial;";
+        box.innerHTML = `
+          <h2>🔒 KoC Data Centre Login</h2>
+          <p>You must log in with SR to enable the script.</p>
+          <button id="srLoginBtn" style="padding:6px 12px;cursor:pointer;">Login to SR</button>
+        `;
+        document.body.prepend(box);
+        document.getElementById("srLoginBtn").addEventListener("click", loginSR);
+      } else {
+        console.warn("🔒 Data Centre disabled — not logged in.");
+      }
+      return;
+    }
+    console.log("✅ Authenticated with SR, continuing…");
+  })();
 
   // =========================
   // === Storage Helpers   ===
   // =========================
 
-  const TIV_KEY = "KoC_DataCentre"; // attack/armory TIV logs
-  const MAP_KEY = "KoC_NameMap";    // latest player snapshot by id
- const API_URL = "https://koc-roster-api-production.up.railway.app";
-
-// === Auth Token Helper ===
-async function getAuthToken() {
-  let token = localStorage.getItem("KoC_AuthToken");
-  let tokenExp = parseInt(localStorage.getItem("KoC_AuthTokenExp") || "0", 10);
-
-  // reuse token if still valid
-  if (token && Date.now() < tokenExp) {
-    return token;
-  }
-
-  // otherwise login again
-  const id = localStorage.getItem("KoC_MyId");
-  const name = localStorage.getItem("KoC_MyName");
-  if (!id || !name) {
-    console.error("❌ Cannot login: missing KoC id/name");
-    return null;
-  }
-
-  try {
-    const resp = await fetch(`${API_URL}/auth/koc`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id, name })
-    });
-    if (!resp.ok) throw new Error("Auth failed " + resp.status);
-    const data = await resp.json();
-
-    token = data.accessToken;
-    const exp = Date.now() + 12 * 60 * 60 * 1000; // 12h
-    localStorage.setItem("KoC_AuthToken", token);
-    localStorage.setItem("KoC_AuthTokenExp", String(exp));
-
-    console.log("🔑 Got new auth token");
-    return token;
-  } catch (err) {
-    console.error("❌ Auth error:", err);
-    return null;
-  }
-}
-
-// === API sender ===
-async function sendToAPI(endpoint, data) {
-  const token = await getAuthToken();
-  if (!token) {
-    console.warn("⚠️ Skipping API send, no token");
-    return;
-  }
-
-  console.log(`🌐 Preparing API call → ${endpoint}`, data);
-
-  fetch(`${API_URL}/${endpoint}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": "Bearer " + token
-    },
-    body: JSON.stringify(data)
-  })
-    .then(async r => {
-      let json;
-      try { json = await r.json(); } catch { json = { error: "Invalid JSON" }; }
-      console.log(`🌐 API response from ${endpoint}:`, json);
-      return json;
-    })
-    .catch(err => {
-      console.error(`❌ API call failed → ${endpoint}`, err);
-    });
-}
-
-
   function getTivLog() {
-    const raw = localStorage.getItem(TIV_KEY) || "[]";
-    try { return JSON.parse(raw); } catch { return []; }
+    try { return JSON.parse(localStorage.getItem(TIV_KEY) || "[]"); }
+    catch { return []; }
   }
-  function saveTivLog(arr) {
-    localStorage.setItem(TIV_KEY, JSON.stringify(arr));
-  }
+  function saveTivLog(arr) { localStorage.setItem(TIV_KEY, JSON.stringify(arr)); }
 
   function getNameMap() {
-    const raw = localStorage.getItem(MAP_KEY) || "{}";
-    try { return JSON.parse(raw); } catch { return {}; }
+    try { return JSON.parse(localStorage.getItem(MAP_KEY) || "{}"); }
+    catch { return {}; }
   }
-  function saveNameMap(map) {
-    localStorage.setItem(MAP_KEY, JSON.stringify(map));
-  }
+  function saveNameMap(map) { localStorage.setItem(MAP_KEY, JSON.stringify(map)); }
 
- function updatePlayerInfo(id, patch) {
-  if (!id) return;
-  const map = getNameMap();
-  const prev = map[id] || {};
+  // =========================
+  // === API Communication ===
+  // =========================
 
-  // Clean out blanks from the new patch
-  const cleanPatch = {};
-  for (const [k, v] of Object.entries(patch)) {
-    if (v !== "Unknown" && v !== "" && v != null) {
-      cleanPatch[k] = v;
+  async function sendToAPI(endpoint, data) {
+    const auth = getStoredAuth();
+    if (!auth || Date.now() > auth.expiry) {
+      console.warn("⚠️ Skipping API send, no valid token");
+      return;
+    }
+
+    console.log(`🌐 Preparing API call → ${endpoint}`, data);
+
+    try {
+      const resp = await fetch(`${API_URL}/${endpoint}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer " + auth.token
+        },
+        body: JSON.stringify(data)
+      });
+      const json = await resp.json().catch(() => ({ error: "Invalid JSON" }));
+      console.log(`🌐 API response from ${endpoint}:`, json);
+      return json;
+    } catch (err) {
+      console.error(`❌ API call failed → ${endpoint}`, err);
     }
   }
 
-  // Merge old + new
-  const updated = { ...prev, ...cleanPatch, lastSeen: new Date().toISOString() };
-  map[id] = updated;
-  saveNameMap(map);
+  // =========================
+  // === Player Updates    ===
+  // =========================
 
-  // Only send if something changed
-  const prevJson = JSON.stringify(prev);
-  const newJson  = JSON.stringify(updated);
-  if (prevJson !== newJson) {
-    // 🔥 Send the *merged record* (so API sees full context),
-    // but with blanks stripped out
-    const apiPayload = {};
-    for (const [k, v] of Object.entries(updated)) {
+  function updatePlayerInfo(id, patch) {
+    if (!id) return;
+    const map = getNameMap();
+    const prev = map[id] || {};
+
+    // Clean patch
+    const cleanPatch = {};
+    for (const [k, v] of Object.entries(patch)) {
       if (v !== "Unknown" && v !== "" && v != null) {
-        apiPayload[k] = v;
+        cleanPatch[k] = v;
       }
     }
-    sendToAPI("players", { id, ...apiPayload });
+
+    // Merge + save
+    const updated = { ...prev, ...cleanPatch, lastSeen: new Date().toISOString() };
+    map[id] = updated;
+    saveNameMap(map);
+
+    // Send if changed
+    if (JSON.stringify(prev) !== JSON.stringify(updated)) {
+      const apiPayload = {};
+      for (const [k, v] of Object.entries(updated)) {
+        if (v !== "Unknown" && v !== "" && v != null) {
+          apiPayload[k] = v;
+        }
+      }
+      sendToAPI("players", { id, ...apiPayload });
+    }
   }
-}
+
+  // =========================
+  // === Alliance Restrict ===
+  // =========================
+  const myId = getStoredAuth()?.id;
+  const me = getNameMap()[myId];
+  if (me && me.alliance !== "Sweet Revenge") {
+    alert("❌ This script is restricted to the Sweet Revenge alliance.");
+    throw new Error("Unauthorized alliance");
+  }
 
 
-
-// =========================
-// === Alliance Restriction
-// =========================
-const myId = localStorage.getItem("KoC_MyId");
-const nameMap = JSON.parse(localStorage.getItem("KoC_NameMap") || "{}");
-const me = nameMap[myId];
-
-if (me && me.alliance !== "Sweet Revenge") {
-  alert("❌ This script is restricted to the Sweet Revenge alliance.");
-  throw new Error("Unauthorized alliance"); // stop script
-}
 
 // ==============================
 // === XP → Attacks Calculator ===
