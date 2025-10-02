@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         KoC Data Centre
 // @namespace    trevo88423
-// @version      1.5.11
-// @description  Tracks TIV + recon stats, syncs to API, provides dashboards & XP→Turn tools.
-// @author       Trevor & ChatGPT
+// @version      1.6.0
+// @description  Sweet Revenge alliance tool: tracks stats, syncs to API, adds dashboards, XP→Turn calculator, and mini Top Stats panel.
+// @author       Blackheart
 // @match        https://www.kingsofchaos.com/*
 // @icon         https://www.kingsofchaos.com/favicon.ico
 // @grant        none
@@ -782,9 +782,160 @@ function collectFromBasePage() {
   sendToAPI("players", { id: myId, ...payload });
 }
 
-if (location.pathname.includes("base.php")) {
-  collectFromBasePage();
+// ===============================
+// === Sweet Revenge Stats Panel ===
+// ===============================
+async function insertTopStatsPanel() {
+  const infoRow = document.querySelector("a[href='info.php']")?.closest("tr");
+  if (!infoRow) return;
+
+  // --- Fetch players (API → fallback to cache) ---
+  let players = [];
+  try {
+    const token = await getValidToken();
+    const resp = await fetch(`${API_URL}/players`, {
+      headers: { "Authorization": "Bearer " + token }
+    });
+    if (resp.ok) players = await resp.json();
+  } catch (err) {
+    console.warn("TopStats API failed, using cache", err);
+    players = Object.values(getNameMap());
+  }
+
+  // ✅ Only Sweet Revenge
+  players = players.filter(p => p.alliance === "Sweet Revenge");
+
+  // --- Abbreviated numbers (RB-style) ---
+  function formatNumber(n) {
+    const num = Number(n) || 0;
+    if (num >= 1e12) return (num / 1e12).toFixed(2) + "T";
+    if (num >= 1e9)  return (num / 1e9).toFixed(2) + "B";
+    if (num >= 1e6)  return (num / 1e6).toFixed(2) + "M";
+    return num.toLocaleString();
+  }
+
+  // --- Sort helper ---
+  function sortedBy(field, asc = false) {
+    return [...players]
+      .filter(p => p[field] !== undefined && p[field] !== null)
+      .sort((a, b) => {
+        const av = Number(a[field]) || 0;
+        const bv = Number(b[field]) || 0;
+        return asc ? (av - bv) : (bv - av);
+      })
+      .map((p, i) => ({
+        id: p.id,
+        rank: i + 1,
+        name: p.name || "Unknown",
+        value: formatNumber(p[field])
+      }));
+  }
+
+  // --- Stat definitions (ordered by row layout) ---
+  const statDefs = [
+    // Row 1
+    { key: "tiv", label: "💰 TIV" },
+    { key: "strikeAction", label: "⚔️ Strike" },
+    { key: "spyRating", label: "🕵️ Spy" },
+    { key: "poisonRating", label: "☠️ Poison" },
+    { key: "theftRating", label: "🪙 Theft" },
+
+    // Row 2
+    { key: "rank", label: "🏅 Rank", asc: true },
+    { key: "defensiveAction", label: "🛡️ Defense" },
+    { key: "sentryRating", label: "👀 Sentry" },
+    { key: "antidoteRating", label: "💊 Antidote" },
+    { key: "vigilanceRating", label: "🔎 Vigilance" }
+  ];
+
+  // --- Build RB-style mini table ---
+  function makeRBTable(title, rows) {
+    const wrap = document.createElement("div");
+    wrap.style.cssText = `
+      flex:1; min-width:160px; max-width:180px;
+      max-height:220px; overflow-y:auto;
+      border:1px solid #333; margin:0;
+    `;
+    wrap.innerHTML = `
+      <table style="width:100%; font-size:10px; border-collapse:collapse; background:#111; color:#ccc;">
+        <thead style="background:#222; color:#6f6; position:sticky; top:0;">
+          <tr><th colspan="2" style="text-align:center;">${title}</th></tr>
+        </thead>
+        <tbody>
+          ${rows.map(r => `
+            <tr>
+              <td style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:90px;">
+                ${r.rank}. <a href="stats.php?id=${r.id}" style="color:#9cf; text-decoration:none;">${r.name}</a>
+              </td>
+              <td align="right" style="white-space:nowrap;">${r.value}</td>
+            </tr>`).join("")}
+        </tbody>
+      </table>
+    `;
+    return wrap;
+  }
+
+  // --- Generate all 10 tables ---
+  const boxes = statDefs.map(def => makeRBTable(def.label, sortedBy(def.key, def.asc)));
+
+  // Row 1 = TIV, Strike, Spy, Poison, Theft
+  const row1 = document.createElement("div");
+  row1.style.cssText = "display:flex; justify-content:center; gap:2px; margin-bottom:6px;";
+  boxes.slice(0, 5).forEach(b => row1.appendChild(b));
+
+  // Row 2 = Rank, Defense, Sentry, Antidote, Vigilance
+  const row2 = document.createElement("div");
+  row2.style.cssText = "display:flex; justify-content:center; gap:2px;";
+  boxes.slice(5, 10).forEach(b => row2.appendChild(b));
+
+  // --- Container row with header + toggle ---
+  const container = document.createElement("tr");
+  const cell = document.createElement("td");
+  cell.colSpan = 2;
+  container.appendChild(cell);
+
+  // Header
+  const header = document.createElement("div");
+  header.style.cssText = "display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; color:gold; font-size:12px; font-weight:bold;";
+  header.innerHTML = `
+    <span>Sweet Revenge Stats</span>
+    <label style="font-size:10px; color:#ccc; cursor:pointer;">
+      <input type="checkbox" id="sr-toggle" style="vertical-align:middle; margin-right:4px;">
+      Hide
+    </label>
+  `;
+
+  // Wrapper for tables
+  const content = document.createElement("div");
+  content.id = "sr-stats-content";
+  content.appendChild(row1);
+  content.appendChild(row2);
+
+  // --- Remember toggle state ---
+  const savedState = localStorage.getItem("srStatsHidden");
+  if (savedState === "true") {
+    content.style.display = "none";
+    header.querySelector("#sr-toggle").checked = true;
+  }
+
+  header.querySelector("#sr-toggle").addEventListener("change", e => {
+    const hidden = e.target.checked;
+    content.style.display = hidden ? "none" : "block";
+    localStorage.setItem("srStatsHidden", hidden);
+  });
+
+  // Build cell
+  cell.appendChild(header);
+  cell.appendChild(content);
+
+  infoRow.parentNode.insertBefore(container, infoRow.nextSibling);
 }
+
+// Run automatically on base.php
+if (location.pathname.includes("base.php")) {
+  insertTopStatsPanel();
+}
+
 
 
 // =========================
