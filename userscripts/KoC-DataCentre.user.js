@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         KoC Data Centre
 // @namespace    trevo88423
-// @version      1.5.10
+// @version      1.5.11
 // @description  Tracks TIV + recon stats, syncs to API, provides dashboards & XP→Turn tools.
 // @author       Trevor & ChatGPT
 // @match        https://www.kingsofchaos.com/*
@@ -278,8 +278,19 @@ function initSidebarCalculator() {
       <tr><td align="center" style="color:black;">Avg Gold/Atk <a href="attacklog.php" id="xp-gold-link" style="color:black;"><span id="xp-gold">0</span></a></td></tr>
       <tr><td align="center" style="color:black;">Total Potential Gold <span id="xp-total">0</span></td></tr>
       <tr><td align="center" style="color:black;">Banked <span id="xp-banked">—</span></td></tr>
-    </tbody>
-  `;
+      <!-- ✅ Sweet Revenge logo row -->
+    <tr>
+  <td align="center">
+    <a href="stats.php?id=datacentre">
+      <img src="https://raw.githubusercontent.com/Trevo88423/koc-roster-api/main/public/SR_Logo.png"
+           alt="Sweet Revenge"
+           style="max-width:110px; height:auto; margin-top:6px; display:block; margin-left:auto; margin-right:auto;">
+    </a>
+  </td>
+</tr>
+
+  </tbody>
+`;
 
   // Find sidebar gold/XP panel and insert after it
   const sidebarTables = document.querySelectorAll("table");
@@ -1007,7 +1018,7 @@ if (location.pathname.includes("inteldetail.php")) {
 // ==============================
 // === Data Centre Roster Page ===
 // ==============================
-if (location.pathname.includes("datacentre")) {
+if (location.search.includes("id=datacentre")) {
   document.title = "KoC Data Centre";
   console.log("[DataCentre] Roster UI loaded");
 
@@ -1029,6 +1040,8 @@ if (location.pathname.includes("datacentre")) {
       <div id="viewAllStats" style="display:none;"></div>
     </div>
   `;
+
+
 
 // ======================================
 // === Data Access (API + local fallback)
@@ -1468,7 +1481,7 @@ document.querySelectorAll("#tabBar button").forEach(btn => {
 }
 
 
-  // =========================
+/// =========================
 // === Button Injection ===
 // =========================
 function addButtons() {
@@ -1481,19 +1494,10 @@ function addButtons() {
     return;
   }
 
-  infoRow.innerHTML = `
-    <td align="center">
-      <a href="info.php" class="koc-button">
-        <img alt="KoC Info" src="/images/bon/KOC_Info_2024.png" width="250">
-      </a>
-    </td>
-    <td align="center">
-      <a id="koc-data-centre-btn" href="datacentre" class="koc-button">
-        <img alt="Data Centre" src="https://raw.githubusercontent.com/Trevo88423/koc-roster-api/main/public/KoC_DataCentre.png" width="250">
-      </a>
-    </td>
-  `;
+  // Clear out the row entirely
+  infoRow.innerHTML = "";
 }
+
 
 // Command Center (base.php) → add buttons + sidebar calc
 if (location.pathname.includes("base.php") && document.querySelector("a[href='logout.php']")) {
