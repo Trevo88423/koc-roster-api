@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         KoC Data Centre
 // @namespace    trevo88423
-// @version      1.5.7
+// @version      1.5.8
 // @description  Tracks TIV + recon stats, syncs to API, provides dashboards & XP→Turn tools.
 // @author       Trevor & ChatGPT
 // @match        https://www.kingsofchaos.com/*
@@ -213,15 +213,6 @@
     }
   }
 
-  // =========================
-  // === Alliance Restrict ===
-  // =========================
-  const myId = getStoredAuth()?.id;
-  const me = getNameMap()[myId];
-  if (me && me.alliance !== "Sweet Revenge") {
-    alert("❌ This script is restricted to the Sweet Revenge alliance.");
-    throw new Error("Unauthorized alliance");
-  }
 
 
 
