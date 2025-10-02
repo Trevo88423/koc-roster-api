@@ -107,6 +107,19 @@ app.get("/players", requireAuth, async (req, res) => {
   }
 });
 
+// --- Get single player by ID ---
+app.get("/players/:id", requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { rows } = await pool.query("SELECT * FROM players WHERE id = $1", [id]);
+    if (!rows.length) return res.status(404).json({ error: "Not found" });
+    res.json(normalizeRow(rows[0]));
+  } catch (err) {
+    console.error("❌ /players/:id DB error:", err);
+    res.status(500).json({ error: "DB error" });
+  }
+});
+
 // --- Helper: clean numbers into BIGINT/null ---
 function toBigInt(val) {
   if (val === null || val === undefined) return null;
