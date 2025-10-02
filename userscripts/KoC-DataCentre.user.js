@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         KoC Data Centre
 // @namespace    trevo88423
-// @version      1.5.9
+// @version      1.5.10
 // @description  Tracks TIV + recon stats, syncs to API, provides dashboards & XP→Turn tools.
 // @author       Trevor & ChatGPT
 // @match        https://www.kingsofchaos.com/*
@@ -849,7 +849,6 @@ function getTableByHeader(text) {
   ).singleNodeValue?.closest("table") || null;
 }
 
-// Return value + optional timestamp if fresh
 function grabStat(id, key, cell) {
   const val = cell?.innerText.trim();
   const prev = getNameMap()[id] || {};
@@ -907,21 +906,15 @@ function collectFromReconPage() {
   stats.treasury = treasury?.[1]?.cells[0]?.innerText.split(" ")[0];
   stats.projectedIncome = treasury?.[3]?.innerText.split(" Gold")[0];
 
-  // === Save locally ===
+  // Save + push
   updatePlayerInfo(id, stats);
   console.log("📊 Recon data saved", stats);
-
-  // === Push to API (logging happens inside sendToAPI) ===
   sendToAPI("players", { id, ...stats });
-  if (stats.tiv) {
-    sendToAPI("tiv", { playerId: id, tiv: stats.tiv });
-  }
+  if (stats.tiv) sendToAPI("tiv", { playerId: id, tiv: stats.tiv });
 
-  enhanceReconUI(id);
+  // Kick off API-first filler (no await here)
+  enhanceReconUI(id).catch(err => console.warn("enhanceReconUI failed:", err));
 }
-
-
-
 
 // =========================
 // === Recon UI Enhancer ===
@@ -954,9 +947,32 @@ function fillMissingReconValue(cell, cachedValue, cachedTime) {
   }
 }
 
-function enhanceReconUI(id) {
-  const map = getNameMap();
-  const prev = map[id] || {};
+async function enhanceReconUI(id) {
+  let prev = {};
+
+  // API-first
+  try {
+    const token = await getValidToken();
+    if (token) {
+      const resp = await fetch(`${API_URL}/players/${id}`, {
+        headers: { "Authorization": "Bearer " + token }
+      });
+      if (resp.ok) {
+        prev = await resp.json();
+        console.log("🌐 Recon fallback loaded from API:", prev);
+      }
+    }
+  } catch (err) {
+    console.warn("⚠️ API recon lookup failed, using local cache", err);
+  }
+
+  // Fallback to local cache
+  if (!prev || Object.keys(prev).length === 0) {
+    const map = getNameMap();
+    prev = map[id] || {};
+  }
+
+  // Fill UI
   const ms = getTableByHeader("Military Stats")?.querySelectorAll("tr");
   if (!ms) return;
 
@@ -983,10 +999,10 @@ function enhanceReconUI(id) {
   fillMissingReconValue(ms?.[23]?.cells[1], prev.experience,         prev.experienceTime);
 }
 
+// Hook
 if (location.pathname.includes("inteldetail.php")) {
   collectFromReconPage();
 }
-
 
 // ==============================
 // === Data Centre Roster Page ===
@@ -1187,7 +1203,7 @@ function renderTable(containerId, columns, rows, defaultSortKey = null, defaultS
         antidote: fmt(info.antidoteRating ?? tivRec.antidoteRating, info.antidoteRatingTime || tivRec.time),
         theft: fmt(info.theftRating ?? tivRec.theftRating, info.theftRatingTime || tivRec.time),
         vigilance: fmt(info.vigilanceRating ?? tivRec.vigilanceRating, info.vigilanceRatingTime || tivRec.time),
-        lastSeen: timeAgo(info.updatedAt)
+        lastSeen: timeAgo(info.updatedAt || info.lastSeen || tivRec.time) // ✅ API first
       };
     });
 
@@ -1195,31 +1211,41 @@ function renderTable(containerId, columns, rows, defaultSortKey = null, defaultS
   return rows;
 }
 
-  function prepareTopTivRows(limit = 20) {
+function prepareTopTivRows(limit = 20) {
   let rows = rosterCache
     .filter(info => info.id !== "self" && info.name !== "Me")
     .map(info => {
       const id = info.id;
       const tivRec = lastTiv[id];
       const tivNum = (typeof info.tiv === "number" ? info.tiv : (tivRec?.tiv || 0));
+
       return {
         name: `<a href="https://www.kingsofchaos.com/attack.php?id=${id}" target="_blank">${info.name || "Unknown"}</a>`,
         tiv: tivNum.toLocaleString(),
-        updated: timeAgo(info.updatedAt)
+        updated: timeAgo(info.updatedAt || tivRec?.time || info.lastSeen) // ✅ API first
       };
     });
+
   rows.sort((a, b) => toNum(b.tiv) - toNum(a.tiv));
   if (limit > 0) rows = rows.slice(0, limit);
   return rows;
 }
 
-
 function prepareAllStatsRows(limit = 10) {
   let rows = rosterCache
-    .filter(info => !!info.strikeAction) // only players we’ve got recon/armory stats for
+    .filter(info => !!info.strikeAction)
     .map(info => {
       const id = info.id;
       const tivNum = (typeof info.tiv === "number" ? info.tiv : 0);
+
+      // ✅ take the newer of API updatedAt and per-stat recon times
+      const latestRecon = (() => {
+        const reconTime = getLatestReconTime(info);
+        if (reconTime && info.updatedAt) {
+          return new Date(Math.max(new Date(reconTime).getTime(), new Date(info.updatedAt).getTime()));
+        }
+        return reconTime || info.updatedAt;
+      })();
 
       return {
         name: `<a href="https://www.kingsofchaos.com/attack.php?id=${id}" target="_blank">${info.name || "Unknown"}</a>`,
@@ -1232,8 +1258,7 @@ function prepareAllStatsRows(limit = 10) {
         antidote: info.antidoteRating || "—",
         theft: info.theftRating || "—",
         vigilance: info.vigilanceRating || "—",
-        // ✅ Use API's updatedAt for consistency across all clients
-        lastRecon: timeAgo(info.updatedAt || getLatestReconTime(info))
+        lastRecon: timeAgo(latestRecon)
       };
     });
 
@@ -1348,15 +1373,16 @@ function renderAllStats(limit = 10) {
         }
 
         return {
-          id,
-          name: info.name || "Unknown",
-          link: `<a href="https://www.kingsofchaos.com/attack.php?id=${id}" target="_blank">${info.name || "Unknown"}</a>`,
-          value,
-          alliance: info.alliance || "",
-          lastRecon: (stat.key==="tiv" || stat.key==="rank"
-                        ? (info.lastSeen || tivRec?.time)
-                        : getLatestReconTime(info))
-        };
+  id,
+  name: info.name || "Unknown",
+  link: `<a href="https://www.kingsofchaos.com/attack.php?id=${id}" target="_blank">${info.name || "Unknown"}</a>`,
+  value,
+  alliance: info.alliance || "",
+  lastRecon: (stat.key === "tiv" || stat.key === "rank")
+               ? (info.updatedAt || tivRec?.time)  // ✅ prefer API updatedAt
+               : (getLatestReconTime(info) || info.updatedAt) // ✅ fallback
+};
+
       });
 
     // === Apply alliance filter ===
@@ -1531,6 +1557,7 @@ window.showTivLog = function() {
   console.log("📊 Log:", log);
   return log;
 };
+
 
 
 
