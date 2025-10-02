@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         KoC Data Centre
 // @namespace    trevo88423
-// @version      1.6.0
+// @version      1.6.1
 // @description  Sweet Revenge alliance tool: tracks stats, syncs to API, adds dashboards, XP→Turn calculator, and mini Top Stats panel.
 // @author       Blackheart
 // @match        https://www.kingsofchaos.com/*
@@ -66,21 +66,33 @@
     }
   }
 
- async function loginSR() {
+async function loginSR() {
   try {
-    // ✅ Look specifically in the User Info table → Name row
-    const nameRow = [...document.querySelectorAll("table tr")]
-      .find(tr => tr.textContent.includes("Name"));
-    const link = nameRow ? nameRow.querySelector("a[href*='stats.php?id=']") : null;
+    let id = null, name = null;
 
-    if (!link) {
-      throw new Error("Go to your own Stats page (Profile) first");
+    // First try: look for link in User Info
+    const link = document.querySelector("a[href*='stats.php?id=']");
+    if (link) {
+      const match = link.href.match(/id=(\d+)/);
+      if (match) id = match[1];
+      name = link.textContent.trim();
     }
 
-    const id = link.href.match(/id=(\d+)/)[1];
-    const name = link.textContent.trim();
+    // Fallback: parse "Name:" row text if link missing
+    if (!id || !name) {
+      const nameRow = [...document.querySelectorAll("table tr")]
+        .find(tr => tr.textContent.includes("Name"));
+      if (nameRow) {
+        name = nameRow.textContent.replace("Name", "").replace(":", "").trim();
+        id = "self"; // fallback marker if no numeric id
+      }
+    }
 
-    // 🪵 Debug helper
+    if (!id || !name) {
+      alert("⚠️ Could not detect your KoC ID/Name — please open your own Stats or Base page and try again.");
+      return;
+    }
+
     console.log("🔍 Detected login info →", { id, name });
 
     // 🔑 Request token from API
@@ -93,16 +105,18 @@
     if (!resp.ok) throw new Error("Auth failed " + resp.status);
     const data = await resp.json();
 
-    // ✅ Store the token with expiry
+    // ✅ Store token
     saveAuth(data.token || data.accessToken, id, name);
 
     alert("✅ SR Login successful! Refreshing…");
     location.reload();
+
   } catch (err) {
     console.error("Login failed", err);
     alert("❌ Login failed: " + err.message);
   }
 }
+
 
 
   function logoutSR() {
