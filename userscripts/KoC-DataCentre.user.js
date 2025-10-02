@@ -66,29 +66,44 @@
     }
   }
 
-  async function loginSR() {
-    try {
-      const link = document.querySelector('a[href*="stats.php?id="]');
-      if (!link) throw new Error("Go to your own Stats page first");
-      const id = link.href.match(/id=(\d+)/)[1];
-      const name = link.textContent.trim();
+ async function loginSR() {
+  try {
+    // ✅ Look specifically in the User Info table → Name row
+    const nameRow = [...document.querySelectorAll("table tr")]
+      .find(tr => tr.textContent.includes("Name"));
+    const link = nameRow ? nameRow.querySelector("a[href*='stats.php?id=']") : null;
 
-      const resp = await fetch(`${API_URL}/auth/koc`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id, name })
-      });
-      if (!resp.ok) throw new Error("Auth failed " + resp.status);
-      const data = await resp.json();
-
-      saveAuth(data.token || data.accessToken, id, name);
-      alert("✅ SR Login successful! Refreshing…");
-      location.reload();
-    } catch (err) {
-      console.error("Login failed", err);
-      alert("❌ Login failed: " + err.message);
+    if (!link) {
+      throw new Error("Go to your own Stats page (Profile) first");
     }
+
+    const id = link.href.match(/id=(\d+)/)[1];
+    const name = link.textContent.trim();
+
+    // 🪵 Debug helper
+    console.log("🔍 Detected login info →", { id, name });
+
+    // 🔑 Request token from API
+    const resp = await fetch(`${API_URL}/auth/koc`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, name })
+    });
+
+    if (!resp.ok) throw new Error("Auth failed " + resp.status);
+    const data = await resp.json();
+
+    // ✅ Store the token with expiry
+    saveAuth(data.token || data.accessToken, id, name);
+
+    alert("✅ SR Login successful! Refreshing…");
+    location.reload();
+  } catch (err) {
+    console.error("Login failed", err);
+    alert("❌ Login failed: " + err.message);
   }
+}
+
 
   function logoutSR() {
     localStorage.removeItem(TOKEN_KEY);
