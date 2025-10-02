@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         KoC Data Centre
 // @namespace    trevo88423
-// @version      1.5.8
+// @version      1.5.9
 // @description  Tracks TIV + recon stats, syncs to API, provides dashboards & XP→Turn tools.
 // @author       Trevor & ChatGPT
 // @match        https://www.kingsofchaos.com/*
@@ -629,7 +629,7 @@ if (location.pathname.includes("battlefield.php")) {
 }
 
 
-  // =========================
+// =========================
 // === Attack TIV Collector
 // =========================
 function collectTIVFromAttackPage() {
@@ -1015,15 +1015,13 @@ if (location.pathname.includes("datacentre")) {
   `;
 
 // ======================================
-// === Data Access (API + local fallback) ===
+// === Data Access (API + local fallback)
 // ======================================
 const API_URL = "https://koc-roster-api-production.up.railway.app";
 
-// Reuse getAuthToken() helper from above
-
 async function loadPlayers() {
   try {
-    const token = await getAuthToken();
+    const token = await getValidToken();   // ✅ use new auth
     if (!token) throw new Error("No token");
     const resp = await fetch(`${API_URL}/players`, {
       headers: { "Authorization": "Bearer " + token }
@@ -1044,6 +1042,7 @@ let rosterCache = []; // holds API or fallback data
 async function initRosterData() {
   rosterCache = await loadPlayers();
 }
+
 
 // TIV log stays local-only for now
 const tivLog  = JSON.parse(localStorage.getItem("KoC_DataCentre") || "[]");
