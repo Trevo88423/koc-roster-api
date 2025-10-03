@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         KoC Data Centre
 // @namespace    trevo88423
-// @version      1.6.4
+// @version      1.6.5
 // @description  Sweet Revenge alliance tool: tracks stats, syncs to API, adds dashboards, XP→Turn calculator, and mini Top Stats panel.
 // @author       Blackheart
 // @match        https://www.kingsofchaos.com/*
@@ -67,12 +67,33 @@
     }
   }
 
-  async function loginSR() {
+    async function loginSR() {
     try {
-      // ✅ Try to parse ID/Name fresh from DOM
-      const link = document.querySelector("a[href*='stats.php?id=']");
-      const id   = link ? link.href.match(/id=(\d+)/)?.[1] : null;
-      const name = link ? link.textContent.trim() : null;
+      let id = null, name = null;
+
+      // --- Look specifically for the "Name" row in the User Info table ---
+      const nameRow = [...document.querySelectorAll("tr")]
+        .find(tr => tr.textContent.includes("Name"));
+      if (nameRow) {
+        const link = nameRow.querySelector("a[href*='stats.php?id=']");
+        if (link) {
+          id = link.href.match(/id=(\d+)/)?.[1];
+          name = link.textContent.trim();
+        }
+      }
+
+      // --- Fallback: first stats.php link ---
+      if (!id || !name) {
+        const link = document.querySelector("a[href*='stats.php?id=']");
+        if (link) {
+          id = link.href.match(/id=(\d+)/)?.[1];
+          name = link.textContent.trim();
+        }
+      }
+
+      // --- Final fallback: localStorage ---
+      if (!id) id = localStorage.getItem("KoC_MyId");
+      if (!name) name = localStorage.getItem("KoC_MyName");
 
       if (!id || !name) {
         throw new Error("Could not detect your KoC ID/Name on this page");
@@ -113,6 +134,7 @@
     alert(`📜 Token Info:\n\nID: ${auth.id}\nName: ${auth.name}\nExpiry: ${new Date(auth.expiry).toLocaleString()}\n\nToken: ${auth.token.substring(0,40)}...`);
     console.log("📜 Full token object:", auth);
   }
+
 
   // ==================
   // === Gatekeeper ===
