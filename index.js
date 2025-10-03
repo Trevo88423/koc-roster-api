@@ -8,35 +8,30 @@ import authKocRouter from "./routes/authKoc.js";
 
 const { Pool } = pkg;
 const app = express();
+
 // --- CORS setup ---
 const allowedOrigins = [
-  "https://www.kingsofchaos.com",  // KoC site
-  "http://localhost:3000"          // local testing
+  "https://www.kingsofchaos.com",
+  "http://localhost:3000"
 ];
 
 const corsOptions = {
   origin: function (origin, callback) {
-    // allow requests with no origin (like curl/postman) or whitelisted origins
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
-      console.warn("❌ Blocked by CORS:", origin);
+      console.warn("Blocked by CORS:", origin);
       callback(new Error("Not allowed by CORS: " + origin));
     }
   },
   methods: ["GET", "POST", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
-  credentials: true, // optional, lets cookies/headers through
+  credentials: true,
 };
 
 app.use(cors(corsOptions));
-
-// ✅ Handle preflight OPTIONS requests with same CORS config
 app.options("*", cors(corsOptions));
-
-
 app.use(express.json());
-
 
 // --- Database setup ---
 const pool = new Pool({
@@ -44,7 +39,6 @@ const pool = new Pool({
   ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false,
 });
 
-// Export db for routes like authKoc.js
 export const db = pool;
 
 // --- JWT Middleware ---
@@ -58,7 +52,7 @@ function requireAuth(req, res, next) {
 
   try {
     req.user = jwt.verify(token, process.env.JWT_SECRET);
-    next(); // ✅ allow request
+    next();
   } catch (err) {
     console.error("JWT verification failed:", err.message);
     return res.status(401).json({ error: "Invalid or expired token" });
@@ -78,7 +72,7 @@ function camelize(row) {
   return out;
 }
 
-// --- Helper: also coerce bigint/text stats into real numbers ---
+// --- Helper: coerce bigint/text stats into real numbers ---
 function normalizeRow(row) {
   const c = camelize(row);
   const numFields = [
@@ -99,7 +93,6 @@ function normalizeRow(row) {
 app.get("/players", requireAuth, async (req, res) => {
   try {
     const { rows } = await pool.query("SELECT * FROM players ORDER BY updated_at DESC");
-    // Convert each row into camelCase keys
     res.json(rows.map(normalizeRow));
   } catch (err) {
     console.error(err);
@@ -115,7 +108,7 @@ app.get("/players/:id", requireAuth, async (req, res) => {
     if (!rows.length) return res.status(404).json({ error: "Not found" });
     res.json(normalizeRow(rows[0]));
   } catch (err) {
-    console.error("❌ /players/:id DB error:", err);
+    console.error("/players/:id DB error:", err);
     res.status(500).json({ error: "DB error" });
   }
 });
@@ -124,7 +117,7 @@ app.get("/players/:id", requireAuth, async (req, res) => {
 function toBigInt(val) {
   if (val === null || val === undefined) return null;
   if (typeof val === "string") {
-    const clean = val.replace(/,/g, "").replace(/[^\d]/g, ""); // strip commas & non-digits
+    const clean = val.replace(/,/g, "").replace(/[^\d]/g, "");
     if (clean === "" || val === "???") return null;
     return BigInt(clean);
   }
@@ -176,12 +169,47 @@ app.post("/players", requireAuth, async (req, res) => {
         NOW()
       )
       ON CONFLICT (id) DO UPDATE SET
-        name     = COALESCE(NULLIF(NULLIF(EXCLUDED.name, ''), '???'), players.name),
-        alliance = COALESCE(NULLIF(NULLIF(EXCLUDED.alliance, ''), '???'), players.alliance),
-        army     = COALESCE(NULLIF(NULLIF(EXCLUDED.army, ''), '???'), players.army),
-        race     = COALESCE(NULLIF(NULLIF(EXCLUDED.race, ''), '???'), players.race),
-        rank     = COALESCE(NULLIF(NULLIF(EXCLUDED.rank, ''), '???'), players.rank),
-        tiv      = COALESCE(EXCLUDED.tiv, players.tiv),
+        name = CASE 
+          WHEN EXCLUDED.name IS NOT NULL 
+            AND EXCLUDED.name != '' 
+            AND EXCLUDED.name != '???' 
+          THEN EXCLUDED.name 
+          ELSE players.name 
+        END,
+        
+        alliance = CASE 
+          WHEN EXCLUDED.alliance IS NOT NULL 
+            AND EXCLUDED.alliance != '' 
+            AND EXCLUDED.alliance != '???' 
+          THEN EXCLUDED.alliance 
+          ELSE players.alliance 
+        END,
+        
+        army = CASE 
+          WHEN EXCLUDED.army IS NOT NULL 
+            AND EXCLUDED.army != '' 
+            AND EXCLUDED.army != '???' 
+          THEN EXCLUDED.army 
+          ELSE players.army 
+        END,
+        
+        race = CASE 
+          WHEN EXCLUDED.race IS NOT NULL 
+            AND EXCLUDED.race != '' 
+            AND EXCLUDED.race != '???' 
+          THEN EXCLUDED.race 
+          ELSE players.race 
+        END,
+        
+        rank = CASE 
+          WHEN EXCLUDED.rank IS NOT NULL 
+            AND EXCLUDED.rank != '' 
+            AND EXCLUDED.rank != '???' 
+          THEN EXCLUDED.rank 
+          ELSE players.rank 
+        END,
+        
+        tiv = COALESCE(EXCLUDED.tiv, players.tiv),
 
         strike_action      = COALESCE(EXCLUDED.strike_action, players.strike_action),
         strike_action_time = COALESCE(EXCLUDED.strike_action_time, players.strike_action_time),
@@ -235,17 +263,15 @@ app.post("/players", requireAuth, async (req, res) => {
     res.json(normalizeRow(rows[0]));
 
   } catch (err) {
-    console.error("❌ /players DB error:", err);
+    console.error("/players DB error:", err);
     res.status(500).json({ error: "DB error" });
   }
 });
-
 
 app.post("/tiv", requireAuth, async (req, res) => {
   try {
     const { playerId, tiv } = req.body;
 
-    // Update main players table
     await pool.query(
       `UPDATE players
        SET tiv = $2,
@@ -254,7 +280,6 @@ app.post("/tiv", requireAuth, async (req, res) => {
       [playerId, toBigInt(tiv)]
     );
 
-    // Insert into TIV logs history
     await pool.query(
       `INSERT INTO tiv_logs (player_id, tiv, time)
        VALUES ($1, $2, NOW())`,
@@ -263,12 +288,12 @@ app.post("/tiv", requireAuth, async (req, res) => {
 
     res.json({ ok: true });
   } catch (err) {
-    console.error("❌ /tiv DB error:", err);
+    console.error("/tiv DB error:", err);
     res.status(500).json({ error: "DB error" });
   }
 });
 
-// --- Plain roster page (for quick debug) ---
+// --- Plain roster page ---
 app.get("/roster", requireAuth, async (req, res) => {
   try {
     const result = await pool.query("SELECT * FROM players ORDER BY updated_at DESC");
@@ -317,5 +342,5 @@ app.get("/roster", requireAuth, async (req, res) => {
 // --- Start server ---
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log("✅ API running on port", PORT);
+  console.log("API running on port", PORT);
 });
