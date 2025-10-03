@@ -181,6 +181,7 @@ app.post("/players", requireAuth, async (req, res) => {
         army     = COALESCE(NULLIF(NULLIF(EXCLUDED.army, ''), '???'), players.army),
         race     = COALESCE(NULLIF(NULLIF(EXCLUDED.race, ''), '???'), players.race),
         rank     = COALESCE(NULLIF(NULLIF(EXCLUDED.rank, ''), '???'), players.rank),
+        tiv      = COALESCE(EXCLUDED.tiv, players.tiv),
 
         strike_action      = COALESCE(EXCLUDED.strike_action, players.strike_action),
         strike_action_time = COALESCE(EXCLUDED.strike_action_time, players.strike_action_time),
