@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         KoC Data Centre
 // @namespace    trevo88423
-// @version      1.6.1
+// @version      1.6.3
 // @description  Sweet Revenge alliance tool: tracks stats, syncs to API, adds dashboards, XP→Turn calculator, and mini Top Stats panel.
 // @author       Blackheart
 // @match        https://www.kingsofchaos.com/*
@@ -68,49 +68,25 @@
 
 async function loginSR() {
   try {
-    let id = null, name = null;
-
-    // First try: look for link in User Info
-    const link = document.querySelector("a[href*='stats.php?id=']");
-    if (link) {
-      const match = link.href.match(/id=(\d+)/);
-      if (match) id = match[1];
-      name = link.textContent.trim();
-    }
-
-    // Fallback: parse "Name:" row text if link missing
-    if (!id || !name) {
-      const nameRow = [...document.querySelectorAll("table tr")]
-        .find(tr => tr.textContent.includes("Name"));
-      if (nameRow) {
-        name = nameRow.textContent.replace("Name", "").replace(":", "").trim();
-        id = "self"; // fallback marker if no numeric id
-      }
-    }
+    const id   = localStorage.getItem("KoC_MyId");
+    const name = localStorage.getItem("KoC_MyName");
 
     if (!id || !name) {
-      alert("⚠️ Could not detect your KoC ID/Name — please open your own Stats or Base page and try again.");
-      return;
+      throw new Error("Go to base.php first so your ID/Name can be captured");
     }
 
-    console.log("🔍 Detected login info →", { id, name });
-
-    // 🔑 Request token from API
     const resp = await fetch(`${API_URL}/auth/koc`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id, name })
     });
-
     if (!resp.ok) throw new Error("Auth failed " + resp.status);
-    const data = await resp.json();
 
-    // ✅ Store token
+    const data = await resp.json();
     saveAuth(data.token || data.accessToken, id, name);
 
     alert("✅ SR Login successful! Refreshing…");
     location.reload();
-
   } catch (err) {
     console.error("Login failed", err);
     alert("❌ Login failed: " + err.message);
