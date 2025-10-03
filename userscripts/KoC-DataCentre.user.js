@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         KoC Data Centre
 // @namespace    trevo88423
-// @version      1.6.3
+// @version      1.6.4
 // @description  Sweet Revenge alliance tool: tracks stats, syncs to API, adds dashboards, XP→Turn calculator, and mini Top Stats panel.
 // @author       Blackheart
 // @match        https://www.kingsofchaos.com/*
@@ -23,7 +23,7 @@
   const TIV_KEY  = "KoC_DataCentre"; // local TIV logs
   const MAP_KEY  = "KoC_NameMap";    // cached player snapshots
 
-  // ========================
+   // ========================
   // === Auth Management  ===
   // ========================
 
@@ -49,6 +49,7 @@
 
     // 🔄 refresh silently
     try {
+      console.log("🔄 Refreshing token for:", auth.id, auth.name);
       const resp = await fetch(`${API_URL}/auth/koc`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -66,34 +67,36 @@
     }
   }
 
-async function loginSR() {
-  try {
-    const id   = localStorage.getItem("KoC_MyId");
-    const name = localStorage.getItem("KoC_MyName");
+  async function loginSR() {
+    try {
+      // ✅ Try to parse ID/Name fresh from DOM
+      const link = document.querySelector("a[href*='stats.php?id=']");
+      const id   = link ? link.href.match(/id=(\d+)/)?.[1] : null;
+      const name = link ? link.textContent.trim() : null;
 
-    if (!id || !name) {
-      throw new Error("Go to base.php first so your ID/Name can be captured");
+      if (!id || !name) {
+        throw new Error("Could not detect your KoC ID/Name on this page");
+      }
+
+      console.log("🔍 Attempting login with:", { id, name });
+
+      const resp = await fetch(`${API_URL}/auth/koc`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, name })
+      });
+      if (!resp.ok) throw new Error("Auth failed " + resp.status);
+
+      const data = await resp.json();
+      saveAuth(data.token || data.accessToken, id, name);
+
+      alert("✅ SR Login successful! Refreshing…");
+      location.reload();
+    } catch (err) {
+      console.error("Login failed", err);
+      alert("❌ Login failed: " + err.message);
     }
-
-    const resp = await fetch(`${API_URL}/auth/koc`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id, name })
-    });
-    if (!resp.ok) throw new Error("Auth failed " + resp.status);
-
-    const data = await resp.json();
-    saveAuth(data.token || data.accessToken, id, name);
-
-    alert("✅ SR Login successful! Refreshing…");
-    location.reload();
-  } catch (err) {
-    console.error("Login failed", err);
-    alert("❌ Login failed: " + err.message);
   }
-}
-
-
 
   function logoutSR() {
     localStorage.removeItem(TOKEN_KEY);
@@ -101,7 +104,19 @@ async function loginSR() {
     location.reload();
   }
 
-  // Gatekeeper
+  function showToken() {
+    const auth = getStoredAuth();
+    if (!auth) {
+      alert("❌ No token stored.");
+      return;
+    }
+    alert(`📜 Token Info:\n\nID: ${auth.id}\nName: ${auth.name}\nExpiry: ${new Date(auth.expiry).toLocaleString()}\n\nToken: ${auth.token.substring(0,40)}...`);
+    console.log("📜 Full token object:", auth);
+  }
+
+  // ==================
+  // === Gatekeeper ===
+  // ==================
   (async () => {
     const token = await getValidToken();
     if (!token) {
@@ -112,9 +127,12 @@ async function loginSR() {
           <h2>🔒 KoC Data Centre Login</h2>
           <p>You must log in with SR to enable the script.</p>
           <button id="srLoginBtn" style="padding:6px 12px;cursor:pointer;">Login to SR</button>
+          <button id="srShowTokenBtn" style="padding:6px 12px;margin-left:10px;cursor:pointer;">Show Token</button>
         `;
         document.body.prepend(box);
+
         document.getElementById("srLoginBtn").addEventListener("click", loginSR);
+        document.getElementById("srShowTokenBtn").addEventListener("click", showToken);
       } else {
         console.warn("🔒 Data Centre disabled — not logged in.");
       }
