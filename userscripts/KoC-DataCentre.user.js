@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         KoC Data Centre
 // @namespace    trevo88423
-// @version      1.6.6
+// @version      1.6.7
 // @description  Sweet Revenge alliance tool: tracks stats, syncs to API, adds dashboards, XP→Turn calculator, and mini Top Stats panel.
 // @author       Blackheart
 // @match        https://www.kingsofchaos.com/*
@@ -382,24 +382,40 @@ if (map[myId]?.projectedIncome !== undefined) {
   projectedIncome = Number(map[myId].projectedIncome) || 0;
 }
 
+const dailyTbg = projectedIncome * 1440;
+let bankedPctText = "—";
 
-    const dailyTbg = projectedIncome * 1440;
-    let bankedPctText = "—";
+if (dailyTbg > 0) {
+  const bankedGold = Math.max(0, dailyTbg - goldLost);
+  const pct = (bankedGold / dailyTbg * 100).toFixed(1);
 
-    if (dailyTbg > 0) {
-      const bankedGold = Math.max(0, dailyTbg - goldLost);
-      const pct = (bankedGold / dailyTbg * 100).toFixed(1);
+  // Pick pill background
+  let bg = "#8b0000";   // 🔴 dark red
+  if (pct >= 25) bg = "#b45309";   // 🟠 amber
+  if (pct >= 50) bg = "#a67c00";   // 🟡 goldenrod
+  if (pct >= 75) bg = "#006400";   // 🟢 dark green
 
-      let color = "limegreen";
-      if (pct < 25) color = "red";
-      else if (pct < 50) color = "orange";
-      else if (pct < 75) color = "gold";
+  bankedPctText = `
+    <span style="
+      display:inline-block;
+      background:${bg};
+      color:#fff;
+      padding:1px 6px;
+      border-radius:6px;
+      font-weight:bold;
+      font-size:11px;
+      line-height:1.2;
+      border:1px solid rgba(0,0,0,0.2); /* subtle outline */
+      vertical-align:middle;
+    ">
+      ${pct}%
+    </span>`;
+}
 
-      bankedPctText = `<span style="color:${color};font-weight:bold;">${pct}% today</span>`;
-    }
+document.getElementById("xp-banked").innerHTML = bankedPctText;
 
-    document.getElementById("xp-banked").innerHTML = bankedPctText;
-  }
+
+   }
 
   updateXPBox();
   console.log("[XPTool] Sidebar box inserted into page");
