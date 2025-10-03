@@ -243,13 +243,26 @@ app.post("/players", requireAuth, async (req, res) => {
 app.post("/tiv", requireAuth, async (req, res) => {
   try {
     const { playerId, tiv } = req.body;
+
+    // Update main players table
     await pool.query(
-      "INSERT INTO tiv_logs (player_id, tiv, time) VALUES ($1, $2, NOW())",
-      [playerId, tiv]
+      `UPDATE players
+       SET tiv = $2,
+           updated_at = NOW()
+       WHERE id = $1`,
+      [playerId, toBigInt(tiv)]
     );
+
+    // Insert into TIV logs history
+    await pool.query(
+      `INSERT INTO tiv_logs (player_id, tiv, time)
+       VALUES ($1, $2, NOW())`,
+      [playerId, toBigInt(tiv)]
+    );
+
     res.json({ ok: true });
   } catch (err) {
-    console.error(err);
+    console.error("❌ /tiv DB error:", err);
     res.status(500).json({ error: "DB error" });
   }
 });
